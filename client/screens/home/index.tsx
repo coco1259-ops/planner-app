@@ -32,6 +32,7 @@ export default function HomePage() {
   const [chatVisible, setChatVisible] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMsg[]>([]);
   const [chatStreaming, setChatStreaming] = useState(false);
+  const [createdToast, setCreatedToast] = useState<string | null>(null);
   const chatRef = useRef<ChatMsg[]>([]);
 
   const fetchTasks = useCallback(async (d: string) => {
@@ -136,16 +137,34 @@ export default function HomePage() {
       pollingInterval: 0,
     });
     let acc = '';
+    let createdCount = 0;
+    let createdDates: string[] = [];
+    const finish = (refreshedDate?: string) => {
+      if (createdCount > 0) {
+        setCreatedToast(`已为你安排 ${createdCount} 项任务`);
+        setTimeout(() => setCreatedToast(null), 3800);
+        if (refreshedDate) setDate(refreshedDate);
+        else fetchTasks(date);
+      }
+      setChatStreaming(false);
+      sse.close();
+    };
     sse.addEventListener('message', (event) => {
       const data = (event as { data?: string }).data ?? '';
       if (data === '[DONE]') {
-        setChatStreaming(false);
-        sse.close();
+        finish(createdCount > 0 && createdDates[0] && createdDates[0] !== date ? createdDates[0] : undefined);
         return;
       }
       try {
         const j = JSON.parse(data);
-        if (j.text) {
+        if (j.type === 'tasks_created') {
+          createdCount = Number(j.count) || 0;
+          if (Array.isArray(j.tasks)) {
+            createdDates = j.tasks
+              .map((t: { plan_date?: string }) => t?.plan_date)
+              .filter((d: unknown): d is string => typeof d === 'string');
+          }
+        } else if (j.text) {
           acc += j.text;
         } else if (j.error) {
           acc = acc || '抱歉，计划管家暂时无法回复。';
@@ -203,6 +222,16 @@ export default function HomePage() {
             </View>
           </View>
         </View>
+
+        {/* 安排成功提示 */}
+        {createdToast && (
+          <View className="mx-4 mt-2">
+            <View className="bg-emerald-500/95 rounded-full px-4 py-2.5 flex-row items-center">
+              <FontAwesome6 name="wand-magic-sparkles" size={13} color="#FFFFFF" />
+              <Text className="text-white text-[13px] flex-1 ml-2">{createdToast}</Text>
+            </View>
+          </View>
+        )}
 
         {/* 任务列表 */}
         {loading ? (

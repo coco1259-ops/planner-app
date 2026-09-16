@@ -12,7 +12,13 @@ interface Props {
 /** 常驻 AI 对话输入条：左侧语音按钮 + 文字输入框 + 发送 */
 export default function ChatInputBar({ onSend, autoFocus, placeholder }: Props) {
   const [text, setText] = useState('');
-  const { recording, processing, start, stop } = useVoiceInput((result) => setText(result));
+  // 语音识别完成后自动发送：说出计划 → 直接交给计划管家执行
+  const { recording, processing, start, stop } = useVoiceInput((result) => {
+    const t = (result ?? '').trim();
+    if (!t) return;
+    setText('');
+    onSend(t);
+  });
   const canShowSend = text.trim().length > 0 || recording || processing;
 
   const handleSend = () => {
