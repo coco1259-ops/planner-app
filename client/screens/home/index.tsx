@@ -9,13 +9,21 @@ import TimePickerSheet from '@/components/TimePickerSheet';
 import DatePickerSheet from '@/components/DatePickerSheet';
 import ChatInputBar from '@/components/ChatInputBar';
 import ChatOverlay, { ChatMsg } from '@/components/ChatOverlay';
+import { useSafeRouter } from '@/hooks/useSafeRouter';
 import { api, Task } from '@/utils/api';
 import RNSSE from 'react-native-sse';
 
 const API_BASE = (process.env.EXPO_PUBLIC_BACKEND_BASE_URL ?? '').replace(/\/$/, '');
 const todayStr = () => dayjs().format('YYYY-MM-DD');
 
+interface OverloadWarning {
+  date: string;
+  totalMinutes: number;
+  availableMinutes: number;
+}
+
 export default function HomePage() {
+  const router = useSafeRouter();
   const [date, setDate] = useState<string>(todayStr());
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
@@ -34,6 +42,8 @@ export default function HomePage() {
   const [chatStreaming, setChatStreaming] = useState(false);
   const [createdToast, setCreatedToast] = useState<string | null>(null);
   const chatRef = useRef<ChatMsg[]>([]);
+  // 排期超载警告
+  const [overloadWarnings, setOverloadWarnings] = useState<OverloadWarning[]>([]);
 
   const fetchTasks = useCallback(async (d: string) => {
     try {
@@ -124,6 +134,7 @@ export default function HomePage() {
   // ---------- AI 对话 ----------
   const sendChat = (text: string) => {
     setChatVisible(true);
+    setOverloadWarnings([]);
     const userMsg: ChatMsg = { role: 'user', content: text };
     const history = [...chatRef.current, userMsg];
     chatRef.current = [...history, { role: 'assistant', content: '' }];
@@ -139,7 +150,9 @@ export default function HomePage() {
     let acc = '';
     let createdCount = 0;
     let createdDates: string[] = [];
+    const overloads: OverloadWarning[] = [];
     const finish = (refreshedDate?: string) => {
+      setOverloadWarnings(overloads);
       if (createdCount > 0) {
         setCreatedToast(`已为你安排 ${createdCount} 项任务`);
         setTimeout(() => setCreatedToast(null), 3800);
@@ -164,6 +177,12 @@ export default function HomePage() {
               .map((t: { plan_date?: string }) => t?.plan_date)
               .filter((d: unknown): d is string => typeof d === 'string');
           }
+        } else if (j.type === 'overload_warning') {
+          overloads.push({
+            date: j.date ?? '',
+            totalMinutes: Number(j.totalMinutes) || 0,
+            availableMinutes: Number(j.availableMinutes) || 0,
+          });
         } else if (j.text) {
           acc += j.text;
         } else if (j.error) {
@@ -233,6 +252,26 @@ export default function HomePage() {
           </View>
         )}
 
+        {/* 排期超载警告 */}
+        {overloadWarnings.length > 0 && (
+          <View className="mx-4 mt-2">
+            <View className="bg-amber-50 rounded-2xl px-4 py-2.5" style={{ borderWidth: 1, borderColor: '#FDE68A' }}>
+              {overloadWarnings.map((w, idx) => {
+                const label = w.date === todayStr() ? '今天' : dayjs(w.date).format('M月D日');
+                return (
+                  <View key={idx} className="flex-row items-start py-0.5">
+                    <FontAwesome6 name="triangle-exclamation" size={13} color="#D97706" style={{ marginTop: 2 }} />
+                    <Text className="text-[13px] text-amber-700 flex-1 ml-2 leading-5">
+                      {label} 全部任务预计共耗时约 {Math.round(w.totalMinutes / 60 * 10) / 10} 小时，
+                      已超过可用工作时间 {Math.round(w.availableMinutes / 60 * 10) / 10} 小时，建议精简安排
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+        )}
+
         {/* 任务列表 */}
         {loading ? (
           <View className="flex-1 items-center justify-center"><ActivityIndicator size="large" color="#4F46E5" /></View>
@@ -256,6 +295,7 @@ export default function HomePage() {
                 onReschedule={setDateSheetTask}
                 onAbandon={abandonTask}
                 onDelete={deleteTask}
+                onOpenDetail={(t) => router.push('/task-detail', { id: t.id })}
               />
             )}
             contentContainerStyle={{ paddingBottom: 12 }}

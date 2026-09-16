@@ -18,6 +18,7 @@ const createSchema = z.object({
   task_type: z.enum(TASK_TYPES).default('light'),
   plan_date: z.string().regex(datePattern, 'plan_date must be YYYY-MM-DD'),
   time_slot: z.string().regex(timeSlotPattern, 'time_slot must be HH:MM').default('09:00'),
+  estimated_duration: z.string().trim().max(40).nullish(),
 });
 
 const updateSchema = z.object({
@@ -26,6 +27,7 @@ const updateSchema = z.object({
   task_type: z.enum(TASK_TYPES).optional(),
   plan_date: z.string().regex(datePattern, 'plan_date must be YYYY-MM-DD').optional(),
   time_slot: z.string().regex(timeSlotPattern, 'time_slot must be HH:MM').optional(),
+  estimated_duration: z.string().trim().max(40).nullable().optional(),
   status: z.enum(TASK_STATUSES).optional(),
 });
 

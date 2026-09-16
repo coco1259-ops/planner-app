@@ -106,6 +106,9 @@ export default function IncompletePage() {
         </View>
         <View className="w-[44px]">
           <Text className="text-[13px] font-semibold text-gray-700">{task.time_slot}</Text>
+          {!!task.estimated_duration && (
+            <Text className="text-[10px] text-gray-400 mt-0.5">{task.estimated_duration}</Text>
+          )}
         </View>
         <View className="flex-1 pr-2">
           <Text className="text-[15px] font-medium text-gray-900" numberOfLines={2}>{task.title}</Text>

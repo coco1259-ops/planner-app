@@ -179,9 +179,10 @@ router.post('/plan', async (req, res) => {
     }
 
     // 2) 若用户是在陈述排期，则抽取为任务并写入「龙水林任务表」
+    let created: Array<{ plan_date: string }> = [];
     if (looksLikePlanRequest(lastUser)) {
       try {
-        const created = await extractAndInsertTasks(client, lastUser, todayStr);
+        created = await extractAndInsertTasks(client, lastUser, todayStr);
         if (created.length > 0) {
           res.write(
             `data: ${JSON.stringify({ type: 'tasks_created', count: created.length, tasks: created })}\n\n`,
@@ -191,6 +192,11 @@ router.post('/plan', async (req, res) => {
         // 抽取失败不影响对话主流程
         console.error('extract tasks error:', err);
       }
+    }
+
+    // 3) 若某日所有任务预计时长合计超过可用工作时间，主动告警
+    if (created.length > 0) {
+      await emitOverloadWarnings(res, created.map((t) => t.plan_date));
     }
 
     res.write('data: [DONE]\n\n');
@@ -212,11 +218,12 @@ async function extractAndInsertTasks(
 ): Promise<Array<{ title: string; plan_date: string; time_slot: string; task_type: string }>> {
   const prompt = `根据用户的日程安排指令，抽取出需要创建的任务。只输出一个 JSON 数组，不要输出任何其他文字、代码块标记或解释。
 每个元素格式（示例）：
-[{"title":"写季度报告","remark":"整理数据","time_slot":"09:00","task_type":"deep","plan_date":"${todayStr}"}]
+[{"title":"写季度报告","remark":"整理数据","time_slot":"09:00","estimated_duration":"1小时","task_type":"deep","plan_date":"${todayStr}"}]
 
 规则：
 - plan_date：默认为 ${todayStr}；若提到"明天"则用 ${dayjs().add(1, 'day').format('YYYY-MM-DD')}；"后天"用 ${dayjs().add(2, 'day').format('YYYY-MM-DD')}。
 - time_slot：根据时间描述推断成 HH:MM（如"上午9点"→09:00，"下午两点"→14:00）；无法判断则用 09:00。
+- estimated_duration：根据指令推断预计时长，用中文描述（如"30分钟""1小时""1小时30分钟"）；无法判断则用空字符串。
 - task_type：深度专注工作=deep；零散小事/杂事/回复消息=light；家庭/买菜/家务/陪家人=family；学习/读书/背单词/上课=study。
 - remark：可为空字符串。
 - 把原文中的各项待办逐条列出。如果用户只是在闲聊、询问建议，而没有明确要排的待办事项，则返回 []。
@@ -250,6 +257,7 @@ async function extractAndInsertTasks(
     task_type: TaskType;
     plan_date: string;
     time_slot: string;
+    estimated_duration: string;
     status: 'todo';
   }> = [];
 
@@ -264,6 +272,8 @@ async function extractAndInsertTasks(
       task_type: ttype as TaskType,
       plan_date: cleanDate(item.plan_date as string),
       time_slot: cleanTimeSlot(item.time_slot as string),
+      estimated_duration:
+        typeof item.estimated_duration === 'string' ? item.estimated_duration.slice(0, 40) : '',
       status: 'todo',
     });
   }
@@ -271,12 +281,60 @@ async function extractAndInsertTasks(
   if (rows.length === 0) return [];
 
   const db = getSupabaseClient();
-  const { data, error } = await db.from('tasks').insert(rows).select('title,plan_date,time_slot,task_type');
+  const { data, error } = await db
+    .from('tasks')
+    .insert(rows)
+    .select('title,plan_date,time_slot,estimated_duration,task_type');
   if (error) {
     console.error('insert tasks error:', error);
     return [];
   }
-  return (data as Array<{ title: string; plan_date: string; time_slot: string; task_type: string }>) ?? [];
+  return (data as Array<{ title: string; plan_date: string; time_slot: string; estimated_duration: string; task_type: string }>) ?? [];
+}
+
+/** 将"预计时长"文本解析为分钟数，便于累加告警。无法解析返回 0。 */
+function parseDurationMinutes(text: string): number {
+  if (!text) return 0;
+  const s = String(text).trim();
+  let minutes = 0;
+  const h = /(\d+(?:\.\d+)?)\s*(小时|时|h|hour|hr)/i.exec(s);
+  const m = /(\d+)\s*(分钟|分|min|m\b)/i.exec(s);
+  if (h) minutes += parseFloat(h[1]) * 60;
+  if (m) minutes += parseInt(m[1], 10);
+  return Math.round(minutes);
+}
+
+const AVAILABLE_WORK_MINUTES = (() => {
+  const n = Number(process.env.OVERLOAD_WORK_MINUTES);
+  return Number.isFinite(n) && n > 0 ? n : 480; // 默认 8 小时
+})();
+
+/** 对受影响日期，计算当日全部预计时长合计，超过可用工作时间则写入告警事件 */
+async function emitOverloadWarnings(
+  res: import('express').Response,
+  affectedDates: string[],
+): Promise<void> {
+  const dates = [...new Set(affectedDates)].filter(Boolean);
+  if (dates.length === 0) return;
+  const db = getSupabaseClient();
+  for (const d of dates) {
+    try {
+      const { data } = await db.from('tasks').select('estimated_duration').eq('plan_date', d);
+      const total = (data ?? []).reduce((sum, r) => sum + parseDurationMinutes(r.estimated_duration || ''), 0);
+      if (total > AVAILABLE_WORK_MINUTES) {
+        res.write(
+          `data: ${JSON.stringify({
+            type: 'overload_warning',
+            date: d,
+            totalMinutes: total,
+            availableMinutes: AVAILABLE_WORK_MINUTES,
+          })}\n\n`,
+        );
+      }
+    } catch {
+      // 个别日期统计失败不影响主流程
+    }
+  }
 }
 
 export default router;

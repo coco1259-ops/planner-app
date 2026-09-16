@@ -14,6 +14,7 @@ export interface Task {
   task_type: TaskType;
   plan_date: string; // YYYY-MM-DD
   time_slot: string; // HH:MM
+  estimated_duration?: string | null; // 如 "30分钟" / "1小时"
   status: TaskStatus;
   created_at: string;
   updated_at: string;
@@ -57,6 +58,8 @@ export const api = {
     request<{ data: Task[] }>(`/api/v1/tasks?date=${date}`),
 
   listIncomplete: () => request<{ data: Task[] }>('/api/v1/tasks/incomplete'),
+
+  getTask: (id: string) => request<{ data: Task }>(`/api/v1/tasks/${id}`),
 
   createTask: (payload: Partial<Task> & { title: string; plan_date: string }) =>
     request<{ data: Task }>('/api/v1/tasks', {

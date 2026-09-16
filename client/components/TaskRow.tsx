@@ -1,5 +1,6 @@
 import { useRef, type ElementRef } from 'react';
 import { Pressable, View, Text } from 'react-native';
+import { FontAwesome6 } from '@expo/vector-icons';
 import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 import { Task, TYPE_META } from '@/utils/api';
 
@@ -13,6 +14,7 @@ interface Props {
   onTimeout: (t: Task) => void;
   onAbandon: (t: Task) => void;
   onDelete: (t: Task) => void;
+  onOpenDetail: (t: Task) => void;
 }
 
 function ActionBtn({ label, color, bg, onPress }: { label: string; color: string; bg: string; onPress: () => void }) {
@@ -30,7 +32,7 @@ function ActionBtn({ label, color, bg, onPress }: { label: string; color: string
 }
 
 /** 可左滑任务行（露出 改期/放弃/删除） */
-export default function TaskRow({ task, isCurrent, onToggle, onReschedule, onTimeout, onAbandon, onDelete }: Props) {
+export default function TaskRow({ task, isCurrent, onToggle, onReschedule, onTimeout, onAbandon, onDelete, onOpenDetail }: Props) {
   const swipeRef = useRef<SwipeableHandle | null>(null);
   const meta = TYPE_META[task.task_type];
   const done = task.status === 'done';
@@ -59,13 +61,31 @@ export default function TaskRow({ task, isCurrent, onToggle, onReschedule, onTim
         className={`bg-white rounded-2xl px-3 py-3 flex-row items-center border ${isCurrent ? 'border-orange-200' : 'border-gray-100'}`}
         style={{ marginVertical: 4, shadowColor: isCurrent ? '#F97316' : '#000000', shadowOpacity: isCurrent ? 0.08 : 0.03, shadowOffset: { width: 0, height: 2 }, shadowRadius: 6, elevation: 1 }}
       >
+        {/* 左侧箭头 → 详情 */}
+        <Pressable
+          hitSlop={8}
+          onPress={(e) => {
+            e.stopPropagation();
+            onOpenDetail(task);
+          }}
+          className="mr-1.5 items-center justify-center"
+          style={{ width: 18 }}
+        >
+          <FontAwesome6 name="chevron-right" size={13} color="#B0B7C3" />
+        </Pressable>
+
         {/* 左侧当前时段竖线 */}
         {isCurrent && <View className="w-1 self-stretch rounded-full mr-2.5" style={{ backgroundColor: '#F97316' }} />}
         {!isCurrent && <View className="w-1 mr-2.5" />}
 
-        {/* 时间段 */}
-        <View className="w-[52px]">
+        {/* 时间段 + 预计时长 */}
+        <View className="w-[58px]">
           <Text className={`text-[13px] font-semibold ${done ? 'text-gray-400' : 'text-gray-800'}`}>{task.time_slot}</Text>
+          {!!task.estimated_duration && (
+            <Text numberOfLines={1} className={`text-[10px] mt-0.5 ${done ? 'text-gray-300' : 'text-gray-400'}`}>
+              {task.estimated_duration}
+            </Text>
+          )}
         </View>
 
         {/* 中间内容 */}
