@@ -134,4 +134,14 @@ export default [
       'no-undef': 'off',
     },
   },
+
+  // 兼容模板 heroui 中引用的 @coze-arch 规则（该插件在本环境未注册，此处注册为关闭以避免“规则未定义”报错）
+  {
+    plugins: {
+      '@coze-arch': { rules: { 'no-regexp-lookbehind': 'off' } },
+    },
+    rules: {
+      '@coze-arch/no-regexp-lookbehind': 'off',
+    },
+  },
 ];
