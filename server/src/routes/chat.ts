@@ -39,6 +39,82 @@ function cleanDate(d: string): string {
 }
 
 /**
+ * 调用用户已部署的「计划管家智能体」（OpenAI 兼容 /v1/chat/completions，SSE 流式）。
+ * 返回 'ok' 表示已成功输出内容；返回 'failed' 表示不可用/无内容（由上层回退到内置大脑）。
+ */
+async function tryStreamAgent(
+  messages: { role: 'user' | 'assistant'; content: string }[],
+  onText: (text: string) => void,
+): Promise<'ok' | 'failed'> {
+  const token = process.env.COZE_WORKLOAD_API_TOKEN;
+  const url =
+    process.env.PLAN_AGENT_URL ||
+    'https://cnhd38mqpq.coze.site/v1/chat/completions';
+  if (!token) return 'failed';
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        session_id: process.env.PLAN_AGENT_SESSION || 'longshuilin-app',
+        messages: messages.map((m) => ({ role: m.role, content: m.content })),
+        stream: true,
+        temperature: 0.7,
+      }),
+    });
+    if (!resp.ok || !resp.body) {
+      return 'failed';
+    }
+    const reader = (resp.body as ReadableStream<Uint8Array>).getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let streamed = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let idx = buffer.indexOf('\n\n');
+      while (idx !== -1) {
+        const event = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        for (const line of event.split('\n')) {
+          const t = line.trim();
+          if (!t.startsWith('data:')) continue;
+          const data = t.slice(5).trim();
+          if (!data || data === '[DONE]') continue;
+          try {
+            const parsed = JSON.parse(data) as {
+              choices?: { delta?: { content?: string }; message?: { content?: string } }[];
+              content?: string;
+            };
+            let content = parsed?.content || '';
+            const choice = parsed?.choices?.[0];
+            if (choice) {
+              content =
+                choice.delta?.content ?? choice.message?.content ?? content;
+            }
+            if (content) {
+              streamed += 1;
+              onText(content.toString());
+            }
+          } catch {
+            // ignore malformed event
+          }
+        }
+        idx = buffer.indexOf('\n\n');
+      }
+    }
+    return streamed > 0 ? 'ok' : 'failed';
+  } catch (err) {
+    console.error('agent stream error:', err);
+    return 'failed';
+  }
+}
+
+/**
  * 服务端文件：server/src/routes/chat.ts
  * 接口：POST /api/v1/chat/plan （SSE 流式）
  * Body：messages: { role: 'user'|'assistant', content: string }[]
@@ -67,28 +143,38 @@ router.post('/plan', async (req, res) => {
   const lastUser =
     [...history].reverse().find((m) => m.role === 'user')?.content ?? '';
 
-  const msgs: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
+  // 内置大脑的消息（带系统提示）
+  const genericMsgs: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
     { role: 'system', content: `${SYSTEM_PROMPT}\n今天是${today}。` },
     ...history,
   ];
+  // 用户已部署的「计划管家智能体」只吃历史对话（它自带人设），不含我们的系统提示
+  const agentMessages: { role: 'user' | 'assistant'; content: string }[] = history;
 
   try {
     const customHeaders = HeaderUtils.extractForwardHeaders(req.headers as Record<string, string>);
     const config = new Config();
     const client = new LLMClient(config, customHeaders);
 
-    // 1) 流式输出计划管家的排期建议
-    const stream = client.stream(msgs, {
-      model: 'doubao-seed-2-0-pro-260215',
-      temperature: 0.7,
+    // 1) 优先调用用户已部署的「计划管家智能体」；失败则回退内置大脑
+    let assistantReply = '';
+    const agentRes = await tryStreamAgent(agentMessages, (text) => {
+      assistantReply += text;
+      res.write(`data: ${JSON.stringify({ text })}\n\n`);
     });
 
-    let assistantReply = '';
-    for await (const chunk of stream) {
-      if (chunk.content) {
-        const text = chunk.content.toString();
-        assistantReply += text;
-        res.write(`data: ${JSON.stringify({ text })}\n\n`);
+    if (agentRes === 'failed') {
+      // 回退：使用内置「计划管家」流式输出
+      const stream = client.stream(genericMsgs, {
+        model: 'doubao-seed-2-0-pro-260215',
+        temperature: 0.7,
+      });
+      for await (const chunk of stream) {
+        if (chunk.content) {
+          const text = chunk.content.toString();
+          assistantReply += text;
+          res.write(`data: ${JSON.stringify({ text })}\n\n`);
+        }
       }
     }
 
