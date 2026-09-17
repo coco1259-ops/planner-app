@@ -316,7 +316,7 @@ export default function HomePage() {
         )}
 
         {/* 常驻 AI 输入条 */}
-        <ChatInputBar onSend={sendChat} />
+        <ChatInputBar onSend={sendChat} onAdd={() => router.push('/task-detail', { date })} />
 
         {/* 时间段弹层 */}
         <TimePickerSheet

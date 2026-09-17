@@ -5,12 +5,13 @@ import { useVoiceInput } from '@/hooks/useVoiceInput';
 
 interface Props {
   onSend: (text: string) => void;
+  onAdd?: () => void;
   autoFocus?: boolean;
   placeholder?: string;
 }
 
-/** 常驻 AI 对话输入条：左侧语音按钮 + 文字输入框 + 发送 */
-export default function ChatInputBar({ onSend, autoFocus, placeholder }: Props) {
+/** 常驻 AI 对话输入条：左侧语音按钮 + 文字输入框 + 右侧(发送/手动添加) */
+export default function ChatInputBar({ onSend, onAdd, autoFocus, placeholder }: Props) {
   const [text, setText] = useState('');
   // 语音识别完成后自动发送：说出计划 → 直接交给计划管家执行
   const { recording, processing, start, stop } = useVoiceInput((result) => {
@@ -75,7 +76,7 @@ export default function ChatInputBar({ onSend, autoFocus, placeholder }: Props) 
           />
         </View>
 
-        {/* 发送按钮 */}
+        {/* 右侧：有输入→发送；无输入→手动添加 */ }
         {canShowSend ? (
           <Pressable
             onPress={handleSend}
@@ -83,6 +84,14 @@ export default function ChatInputBar({ onSend, autoFocus, placeholder }: Props) 
             style={{ backgroundColor: '#4F46E5' }}
           >
             <FontAwesome6 name="arrow-up" size={18} color="#FFFFFF" />
+          </Pressable>
+        ) : onAdd ? (
+          <Pressable
+            onPress={onAdd}
+            className="w-12 h-12 rounded-full items-center justify-center"
+            style={{ backgroundColor: '#EEF2FF' }}
+          >
+            <FontAwesome6 name="plus" size={19} color="#4F46E5" />
           </Pressable>
         ) : (
           <View className="w-12" />

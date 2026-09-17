@@ -4,7 +4,15 @@
  */
 const API_BASE = (process.env.EXPO_PUBLIC_BACKEND_BASE_URL ?? '').replace(/\/$/, '');
 
-export type TaskType = 'deep' | 'light' | 'family' | 'study';
+export type TaskType =
+  | 'work'
+  | 'childcare'
+  | 'chores'
+  | 'personal'
+  | 'study'
+  | 'deep'
+  | 'light'
+  | 'family';
 export type TaskStatus = 'todo' | 'done' | 'abandoned';
 
 export interface Task {
@@ -21,13 +29,19 @@ export interface Task {
 }
 
 export const TYPE_META: Record<TaskType, { name: string; color: string }> = {
+  work: { name: '工作', color: '#3B82F6' },
+  childcare: { name: '带娃', color: '#EC4899' },
+  chores: { name: '家务', color: '#F97316' },
+  personal: { name: '个人', color: '#A855F7' },
+  study: { name: '学习', color: '#14B8A6' },
+  // 兼容旧数据回显
   deep: { name: '深度', color: '#3B82F6' },
   light: { name: '轻任务', color: '#22C55E' },
   family: { name: '家庭', color: '#F97316' },
-  study: { name: '学习', color: '#A855F7' },
 };
 
-export const TYPE_ORDER: TaskType[] = ['deep', 'light', 'family', 'study'];
+// 新建/编辑时的类型选项（新 5 类）
+export const TYPE_ORDER: TaskType[] = ['work', 'childcare', 'chores', 'personal', 'study'];
 
 export const STATUS_META: Record<TaskStatus, { name: string; color: string }> = {
   todo: { name: '未做', color: '#F97316' },

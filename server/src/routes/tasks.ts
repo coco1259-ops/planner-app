@@ -5,19 +5,29 @@ import { getSupabaseClient } from '../storage/database/supabase-client';
 const router = Router();
 const db = getSupabaseClient();
 
-export const TASK_TYPES = ['deep', 'light', 'family', 'study'] as const;
+export const TASK_TYPES = [
+  'deep',
+  'light',
+  'family',
+  'study',
+  'work',
+  'childcare',
+  'chores',
+  'personal',
+] as const;
 export type TaskType = (typeof TASK_TYPES)[number];
 export const TASK_STATUSES = ['todo', 'done', 'abandoned'] as const;
 
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
-const timeSlotPattern = /^\d{2}:\d{2}$/;
+// 兼容单个时间（09:00）与时间段范围（4:00-7:00）
+const timeSlotPattern = /^\d{1,2}:\d{2}(-\d{1,2}:\d{2})?$/;
 
 const createSchema = z.object({
   title: z.string().trim().min(1).max(200),
   remark: z.string().trim().max(500).optional().nullable(),
   task_type: z.enum(TASK_TYPES).default('light'),
   plan_date: z.string().regex(datePattern, 'plan_date must be YYYY-MM-DD'),
-  time_slot: z.string().regex(timeSlotPattern, 'time_slot must be HH:MM').default('09:00'),
+  time_slot: z.string().regex(timeSlotPattern, 'time_slot must be HH:MM or HH:MM-HH:MM').default('09:00'),
   estimated_duration: z.string().trim().max(40).nullish(),
 });
 
@@ -26,7 +36,7 @@ const updateSchema = z.object({
   remark: z.string().trim().max(500).nullable().optional(),
   task_type: z.enum(TASK_TYPES).optional(),
   plan_date: z.string().regex(datePattern, 'plan_date must be YYYY-MM-DD').optional(),
-  time_slot: z.string().regex(timeSlotPattern, 'time_slot must be HH:MM').optional(),
+  time_slot: z.string().regex(timeSlotPattern, 'time_slot must be HH:MM or HH:MM-HH:MM').optional(),
   estimated_duration: z.string().trim().max(40).nullable().optional(),
   status: z.enum(TASK_STATUSES).optional(),
 });
