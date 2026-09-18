@@ -5,16 +5,61 @@ import { getSupabaseClient } from '../storage/database/supabase-client';
 
 const router = Router();
 
-const SYSTEM_PROMPT = `你是「计划管家」，一位专业、贴心的个人日程规划助手。
-你的职责：
-1. 帮助用户把待办事项、想法整理成一天的具体时间安排。
-2. 事项划分到四类：深度（需要专注的工作）、轻任务（零散小事）、家庭（家庭琐事）、学习（成长学习）。
-3. 回复简洁、直接、可执行：给出明确的时间段与排序建议，避免空泛套话。
-4. 若用户列出多项任务，请按优先级和精力状况排出先后顺序，必要时说明理由。
-5. 当你已经为用户把待办整理进某一天的计划清单时，请在回复末尾自然说明"已为你安排 N 项任务（日期）"，方便用户确认。
-6. 不要使用 Markdown 表格，使用分行的纯文本便于移动端阅读。`;
+const SYSTEM_PROMPT = `# 角色
+你是龙水林的日程计划管家。龙水林：独自带娃的宝爸，母婴自媒体创作者（一人+3个AI员工的虚拟团队）。他的时间极度稀缺，你存在的唯一价值：保护他的整块时间不被侵蚀。
 
-const TASK_TYPES = ['deep', 'light', 'family', 'study'] as const;
+# 龙水林的固定作息（铁律，任何计划不得占用这些时段）
+4:00 起床工作 → 7:00 伺候孩子起床洗漱早餐 → 8:00–10:00 户外 → 10:00–11:00 做午饭吃饭 → 11:00–12:30 陪娃+碎片工作 → 12:30–13:30 午睡 → 13:30–14:30 工作 → 14:30–15:00 加餐 → 15:00–17:00 户外 → 17:00–18:00 做晚饭 → 18:00–18:30 晚饭 → 18:30–21:00 备餐/洗澡/护理/启蒙绘本/排明日计划 → 21:00 关灯睡觉
+
+# 可用工作时段（只在这些时段里排）
+- 深度整块：4:00–7:00（3小时）、13:30–14:30（1小时）
+- 碎片：11:00–12:30（半陪半工作）、户外偶发零碎
+- 出行日（每周约2天，不定哪天）：默认只保留4:00–7:00
+
+# 工作流一：任务排程
+1. 收到排计划请求，先反问三件（没答完不排）：
+   ① 明天常规日还是出行日？
+   ② 明天的核心事项有哪些？（口述即可，想到啥说啥）
+   ③ 有没有硬截止？（定时发布/合作交付）
+2. 排程（一步步来）：
+   - 4:00–7:00 只给深度工作：写脚本/终审/剪辑单/周计划，按30分钟一格
+   - 碎片时间给轻任务：回评论/审核AI产出/浏览素材
+   - 禁止"尽量、争取"——只有"几点，做什么"
+   - 单日总量不超过4.5小时，留缓冲
+3. 输出格式（一行一任务）：时间段 | 事项 | 类型 | 备注
+
+# 工作流二：内容排期创建
+1. 用户提到"商单/接单/排期/选题定了/发布日期"等意图时，进入排期创建流程
+2. 必须反问（没答完不建）：
+   ① 项目名称？② 商单还是科普选题？③ 发布日期？
+   （商单再问客户名，科普选题跳过）
+3. 信息齐后写入 schedule 表，只填已确认的字段，
+   用户没提的阶段日期留空，完成状态默认"未完成"
+4. 写入成功后回复："排期已建，各阶段日期去排期Tab补上"
+
+# 约束
+- 铁律时段出现在计划里 = 排错了，重来
+- 事项超过8条，主动提示精简
+- 计划末尾给1句风险提示：哪项最可能被孩子打断、被打断后挪到哪个空隙
+
+# 写表规则一：任务 → tasks 表
+排程确认后写入 tasks 表：
+- 日期（plan_date，"明天"换算成具体日期 YYYY-MM-DD）
+- 时间段（time_slot，格式 HH:MM）、事项（title）、备注（remark）
+- 类型（task_type，只能选：deep=深度/light=轻度/personal=个人/study=学习/goal=目标）
+- 状态默认"未做"（todo）
+写完回复："已写入 N 条任务到任务表"
+
+# 写表规则二：排期 → schedule 表
+排期信息确认后写入 schedule 表，只填已确认字段（project_name/schedule_type/client_name/pub_date），
+未提的阶段日期留空，所有完成状态默认未完成。
+写入成功回复："排期已建，各阶段日期去排期Tab补上"
+
+# 通用
+- 不要使用 Markdown 表格，使用分行的纯文本便于移动端阅读
+- 今天是{date}`;
+
+const TASK_TYPES = ['deep', 'light', 'personal', 'study', 'goal'] as const;
 type TaskType = (typeof TASK_TYPES)[number];
 
 function looksLikePlanRequest(text: string): boolean {
@@ -39,88 +84,14 @@ function cleanDate(d: string): string {
 }
 
 /**
- * 调用用户已部署的「计划管家智能体」（OpenAI 兼容 /v1/chat/completions，SSE 流式）。
- * 返回 'ok' 表示已成功输出内容；返回 'failed' 表示不可用/无内容（由上层回退到内置大脑）。
- */
-async function tryStreamAgent(
-  messages: { role: 'user' | 'assistant'; content: string }[],
-  onText: (text: string) => void,
-): Promise<'ok' | 'failed'> {
-  const token = process.env.COZE_WORKLOAD_API_TOKEN;
-  const url =
-    process.env.PLAN_AGENT_URL ||
-    'https://cnhd38mqpq.coze.site/v1/chat/completions';
-  if (!token) return 'failed';
-  try {
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        session_id: process.env.PLAN_AGENT_SESSION || 'longshuilin-app',
-        messages: messages.map((m) => ({ role: m.role, content: m.content })),
-        stream: true,
-        temperature: 0.7,
-      }),
-    });
-    if (!resp.ok || !resp.body) {
-      return 'failed';
-    }
-    const reader = (resp.body as ReadableStream<Uint8Array>).getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let streamed = 0;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let idx = buffer.indexOf('\n\n');
-      while (idx !== -1) {
-        const event = buffer.slice(0, idx);
-        buffer = buffer.slice(idx + 2);
-        for (const line of event.split('\n')) {
-          const t = line.trim();
-          if (!t.startsWith('data:')) continue;
-          const data = t.slice(5).trim();
-          if (!data || data === '[DONE]') continue;
-          try {
-            const parsed = JSON.parse(data) as {
-              choices?: { delta?: { content?: string }; message?: { content?: string } }[];
-              content?: string;
-            };
-            let content = parsed?.content || '';
-            const choice = parsed?.choices?.[0];
-            if (choice) {
-              content =
-                choice.delta?.content ?? choice.message?.content ?? content;
-            }
-            if (content) {
-              streamed += 1;
-              onText(content.toString());
-            }
-          } catch {
-            // ignore malformed event
-          }
-        }
-        idx = buffer.indexOf('\n\n');
-      }
-    }
-    return streamed > 0 ? 'ok' : 'failed';
-  } catch (err) {
-    console.error('agent stream error:', err);
-    return 'failed';
-  }
-}
-
-/**
  * 服务端文件：server/src/routes/chat.ts
  * 接口：POST /api/v1/chat/plan （SSE 流式）
  * Body：messages: { role: 'user'|'assistant', content: string }[]
  * 事件：
  *   data: {"text":"..."}         - 回复正文流式内容
  *   data: {"type":"tasks_created","count":N,"tasks":[...]}
+ *   data: {"type":"schedule_created","message":"..."}
+ *   data: {"type":"overload_warning","date":"...","totalMinutes":N,"availableMinutes":N}
  *   data: [DONE]
  */
 router.post('/plan', async (req, res) => {
@@ -143,44 +114,50 @@ router.post('/plan', async (req, res) => {
   const lastUser =
     [...history].reverse().find((m) => m.role === 'user')?.content ?? '';
 
-  // 内置大脑的消息（带系统提示）
+  // 内置大脑的消息（带系统提示），今天是今天日期
   const genericMsgs: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
-    { role: 'system', content: `${SYSTEM_PROMPT}\n今天是${today}。` },
+    { role: 'system', content: SYSTEM_PROMPT.replace('{date}', today) },
     ...history,
   ];
-  // 用户已部署的「计划管家智能体」只吃历史对话（它自带人设），不含我们的系统提示
-  const agentMessages: { role: 'user' | 'assistant'; content: string }[] = history;
 
   try {
     const customHeaders = HeaderUtils.extractForwardHeaders(req.headers as Record<string, string>);
     const config = new Config();
     const client = new LLMClient(config, customHeaders);
 
-    // 1) 优先调用用户已部署的「计划管家智能体」；失败则回退内置大脑
+    // 用内置「计划管家」流式输出（不再依赖外部 agent）
     let assistantReply = '';
-    const agentRes = await tryStreamAgent(agentMessages, (text) => {
-      assistantReply += text;
-      res.write(`data: ${JSON.stringify({ text })}\n\n`);
+    const stream = client.stream(genericMsgs, {
+      model: 'doubao-seed-2-0-pro-260215',
+      temperature: 0.7,
     });
-
-    if (agentRes === 'failed') {
-      // 回退：使用内置「计划管家」流式输出
-      const stream = client.stream(genericMsgs, {
-        model: 'doubao-seed-2-0-pro-260215',
-        temperature: 0.7,
-      });
-      for await (const chunk of stream) {
-        if (chunk.content) {
-          const text = chunk.content.toString();
-          assistantReply += text;
-          res.write(`data: ${JSON.stringify({ text })}\n\n`);
-        }
+    for await (const chunk of stream) {
+      if (chunk.content) {
+        const text = chunk.content.toString();
+        assistantReply += text;
+        res.write(`data: ${JSON.stringify({ text })}\n\n`);
       }
     }
 
-    // 2) 若用户是在陈述排期，则抽取为任务并写入「龙水林任务表」
+    // 2) 排期创建流程（写 schedule 表）优先于任务抽取判断
+    let scheduleResult: 'created' | 'need_more_info' | 'none' = 'none';
+    try {
+      scheduleResult = await maybeCreateSchedule(client, lastUser);
+      if (scheduleResult === 'created') {
+        res.write(
+          `data: ${JSON.stringify({ type: 'schedule_created', message: '排期已建，各阶段日期去排期Tab补上' })}\n\n`,
+        );
+      } else if (scheduleResult === 'need_more_info') {
+        // 信息不全：由 AI 对话继续反问，这里不发写表事件
+      }
+    } catch (e) {
+      // 失败不影响主流程
+      console.error('create schedule error:', e);
+    }
+
+    // 3) 若未走排期且用户在陈述排任务，则抽取为任务并写入 tasks 表
     let created: Array<{ plan_date: string }> = [];
-    if (looksLikePlanRequest(lastUser)) {
+    if (scheduleResult !== 'created' && looksLikePlanRequest(lastUser)) {
       try {
         created = await extractAndInsertTasks(client, lastUser, todayStr);
         if (created.length > 0) {
@@ -194,7 +171,7 @@ router.post('/plan', async (req, res) => {
       }
     }
 
-    // 3) 若某日所有任务预计时长合计超过可用工作时间，主动告警
+    // 4) 若某日所有任务预计时长合计超过可用工作时间，主动告警
     if (created.length > 0) {
       await emitOverloadWarnings(res, created.map((t) => t.plan_date));
     }
@@ -224,7 +201,7 @@ async function extractAndInsertTasks(
 - plan_date：默认为 ${todayStr}；若提到"明天"则用 ${dayjs().add(1, 'day').format('YYYY-MM-DD')}；"后天"用 ${dayjs().add(2, 'day').format('YYYY-MM-DD')}。
 - time_slot：根据时间描述推断成 HH:MM（如"上午9点"→09:00，"下午两点"→14:00）；无法判断则用 09:00。
 - estimated_duration：根据指令推断预计时长，用中文描述（如"30分钟""1小时""1小时30分钟"）；无法判断则用空字符串。
-- task_type：深度专注工作=deep；零散小事/杂事/回复消息=light；家庭/买菜/家务/陪家人=family；学习/读书/背单词/上课=study。
+- task_type：深度专注工作/写脚本/剪辑=deep；零散小事/回评论/审核AI产出/浏览素材=light；个人事务/陪娃外私事=personal；学习/读书/背单词/上课=study；目标=goal。
 - remark：可为空字符串。
 - 把原文中的各项待办逐条列出。如果用户只是在闲聊、询问建议，而没有明确要排的待办事项，则返回 []。
 
@@ -335,6 +312,101 @@ async function emitOverloadWarnings(
       // 个别日期统计失败不影响主流程
     }
   }
+}
+
+/** 将"stages 中文键名 → {date, done}"对象按 8 阶段规范化（缺失的补空、done 默认 false）。 */
+const SCHEDULE_STAGE_KEYS = ['大纲', '粗稿', '定稿', '拍摄', '粗剪', '送审', '精剪', '发布'] as const;
+
+function normalizeStages(raw: unknown): Record<string, { date: string | null; done: boolean }> {
+  const out: Record<string, { date: string | null; done: boolean }> = {};
+  for (const key of SCHEDULE_STAGE_KEYS) {
+    const item = (raw && typeof raw === 'object' ? raw as Record<string, any> : {})[key];
+    let date: string | null = null;
+    let done = false;
+    if (item && typeof item === 'object') {
+      if (typeof item.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.date)) date = item.date;
+      if (item.done === true) done = true;
+    }
+    out[key] = { date, done };
+  }
+  return out;
+}
+
+/**
+ * 判断用户是否在发起"内容排期创建"，若信息齐全则写入 schedule 表。
+ * 返回 'created' 表示已写入；'need_more_info' 表示命中了排期意图但信息不全（不写表）；'none' 表示非排期请求。
+ */
+async function maybeCreateSchedule(client: LLMClient, userText: string): Promise<'created' | 'need_more_info' | 'none'> {
+  const intent = /排期|商单|接单|选题定了|选题|发布日期|发布时间|上刊|合作交付|客户/.test(userText || '');
+  if (!intent) return 'none';
+
+  const prompt = `判断用户是否在要求"创建一条内容排期"（项目/选题/商单构思并定档）。
+只输出一个 JSON 对象，不要输出任何其他文字。若信息不满足则返回 {"status":false}。
+
+需要项目名称、类型（商单/科普选题）、发布日期。类型常见表述：
+- 商单：提到客户/品牌/合作/接单/商单
+- 科普选题：明确说是选题/科普
+若是商单还需客户名。
+
+输出格式：
+{"status":true,"project_name":"...","schedule_type":"商单|科普选题","client_name":"...或空","pub_date":"YYYY-MM-DD"}
+
+规则：
+- pub_date 仅当用户明确给出发布日期；否则可根据今天(${dayjs().format('YYYY-MM-DD')})及"下周/周五/月底"推算出合理日期；仍无法确定返回空字符串。
+- 只填用户明确确认的信息，缺少关键字段也填，交由上层判断。
+- 用户只是在闲聊或询问建议而非确定要建排期，返回 {"status":false}。
+
+用户指令：${userText}`;
+
+  let resp;
+  try {
+    resp = await client.invoke(
+      [{ role: 'user', content: prompt }],
+      { model: 'doubao-seed-2-0-lite-260215', temperature: 0.1 },
+    );
+  } catch (e) {
+    console.error('schedule intent invoke error:', e);
+    return 'none';
+  }
+
+  let obj: Record<string, unknown> | null = null;
+  try {
+    const raw = (resp?.content ?? '').replace(/```json/gi, '').replace(/```/g, '').trim();
+    const start = raw.indexOf('{');
+    const end = raw.lastIndexOf('}');
+    obj = JSON.parse(start >= 0 && end > start ? raw.slice(start, end + 1) : raw);
+  } catch {
+    obj = null;
+  }
+
+  if (!obj || obj.status !== true) return 'none';
+
+  const projectName = typeof obj.project_name === 'string' ? obj.project_name.trim() : '';
+  const scheduleType = obj.schedule_type === '科普选题' ? '科普选题' : '商单';
+  const clientName = typeof obj.client_name === 'string' ? obj.client_name.trim() : '';
+  let pubDate = typeof obj.pub_date === 'string' ? obj.pub_date.trim() : '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(pubDate)) pubDate = '';
+  // 发布日期至少不能早于今天（宽松处理：排期通常是未来）
+  // "必填：项目名称 + 类型 + 发布日期" 三项齐全才写入
+  if (!projectName || !pubDate) {
+    // 缺关键字段：信息不全，返回 need_more_info，交由对话反问
+    return 'need_more_info';
+  }
+
+  const stages = normalizeStages({});
+  const db = getSupabaseClient();
+  const { error } = await db.from('schedule').insert({
+    project_name: projectName,
+    schedule_type: scheduleType,
+    client_name: scheduleType === '商单' ? clientName : '',
+    pub_date: pubDate,
+    stages,
+  });
+  if (error) {
+    console.error('insert schedule error:', error);
+    return 'none';
+  }
+  return 'created';
 }
 
 export default router;
