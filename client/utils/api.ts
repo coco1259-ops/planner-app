@@ -12,7 +12,8 @@ export type TaskType =
   | 'study'
   | 'deep'
   | 'light'
-  | 'family';
+  | 'family'
+  | 'goal';
 export type TaskStatus = 'todo' | 'done' | 'abandoned';
 
 export interface Task {
@@ -46,6 +47,8 @@ export const TYPE_META: Record<TaskType, { name: string; color: string }> = {
   childcare: { name: '轻度', color: '#22C55E' },
   chores: { name: '轻度', color: '#22C55E' },
   family: { name: '个人', color: '#A855F7' },
+  // 本周目标
+  goal: { name: '目标', color: '#F59E0B' },
 };
 
 // 新建/编辑时的可选类型：深度 / 轻度 / 个人 / 学习
@@ -81,6 +84,14 @@ export const api = {
 
   listIncomplete: () => request<{ data: Task[] }>('/api/v1/tasks/incomplete'),
 
+  /**
+   * 服务端文件：server/src/routes/tasks.ts
+   * 接口：GET /api/v1/tasks/range
+   * Query 参数：start: string (YYYY-MM-DD), end: string (YYYY-MM-DD), status?: 'todo'
+   */
+  listRange: (start: string, end: string, status?: 'todo') =>
+    request<{ data: Task[] }>(`/api/v1/tasks/range?start=${start}&end=${end}${status ? `&status=${status}` : ''}`),
+
   getTask: (id: string) => request<{ data: Task }>(`/api/v1/tasks/${id}`),
 
   createTask: (payload: Partial<Task> & { title: string; plan_date: string }) =>
@@ -115,4 +126,23 @@ export const api = {
       byStatus: { name: string; key: TaskStatus; color: string; value: number }[];
       trend: { date: string; label: string; count: number }[];
     }>('/api/v1/stats/overview'),
+
+  /**
+   * 服务端文件：server/src/routes/travel-days.ts
+   * 接口：GET /api/v1/travel-days
+   * Query 参数：weekKey: string (该周周一日期)
+   */
+  getTravelDays: (weekKey: string) =>
+    request<{ data: string[] }>(`/api/v1/travel-days?weekKey=${weekKey}`),
+
+  /**
+   * 服务端文件：server/src/routes/travel-days.ts
+   * 接口：POST /api/v1/travel-days
+   * Body 参数：weekKey: string, dates: string[]
+   */
+  saveTravelDays: (weekKey: string, dates: string[]) =>
+    request<{ data: string[] }>('/api/v1/travel-days', {
+      method: 'POST',
+      body: JSON.stringify({ weekKey, dates }),
+    }),
 };

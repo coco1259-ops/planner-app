@@ -7,6 +7,7 @@ import tasksRouter from "./routes/tasks";
 import statsRouter from "./routes/stats";
 import chatRouter from "./routes/chat";
 import voiceRouter from "./routes/voice";
+import travelDaysRouter from "./routes/travel-days";
 
 const app = express();
 const port = process.env.PORT || 9091;
@@ -28,6 +29,7 @@ app.use('/api/v1/tasks', tasksRouter);
 app.use('/api/v1/stats', statsRouter);
 app.use('/api/v1/chat', chatRouter);
 app.use('/api/v1/voice', voiceRouter);
+app.use('/api/v1/travel-days', travelDaysRouter);
 
 // ---- 托管前端 Web 静态页面（便于手机浏览器直接访问 / 打开 App）----
 const webDist = path.join(__dirname, "..", "public");

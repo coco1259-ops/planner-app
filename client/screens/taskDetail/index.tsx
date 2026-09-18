@@ -21,11 +21,14 @@ import { api, TaskType, TaskStatus, TYPE_META, TYPE_ORDER } from '@/utils/api';
 const TIME_PATTERN = /^\d{1,2}:\d{2}(?:-\d{1,2}:\d{2})?$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const TODAY = () => dayjs().format('YYYY-MM-DD');
+// 计算本周周一的日期
+export const WEEK_MONDAY = () => dayjs().startOf('week').add(1, 'day').format('YYYY-MM-DD');
 
 export default function TaskDetailPage() {
   const router = useSafeRouter();
-  const { id, date } = useSafeSearchParams<{ id?: string; date?: string }>();
+  const { id, date, type } = useSafeSearchParams<{ id?: string; date?: string; type?: string }>();
   const isEdit = !!id;
+  const isGoal = type === 'goal';
 
   const [loading, setLoading] = useState(isEdit);
   const [saving, setSaving] = useState(false);
@@ -33,9 +36,10 @@ export default function TaskDetailPage() {
   const [remark, setRemark] = useState('');
   const [timeSlot, setTimeSlot] = useState('');
   const [duration, setDuration] = useState('');
-  const [taskType, setTaskType] = useState<TaskType>('deep');
+  const [taskType, setTaskType] = useState<TaskType>(isGoal ? 'goal' : 'deep');
   const [status, setStatus] = useState<TaskStatus>('todo');
-  const [planDate, setPlanDate] = useState(date || TODAY());
+  // 目标模式：日期固定为本周周一；普通模式：使用传入 date 或今天
+  const [planDate, setPlanDate] = useState(date || (isGoal ? WEEK_MONDAY() : TODAY()));
 
   const load = useCallback(async () => {
     if (!isEdit || !id) return;
@@ -146,7 +150,7 @@ export default function TaskDetailPage() {
           <FontAwesome6 name="arrow-left" size={18} color="#374151" />
         </TouchableOpacity>
         <Text className="flex-1 text-center text-[17px] font-semibold text-gray-900">
-          {isEdit ? '任务详情' : '新增任务'}
+          {isEdit ? (isGoal ? '目标详情' : '任务详情') : isGoal ? '新增目标' : '新增任务'}
         </Text>
         <Pressable
           onPress={handleSave}
@@ -178,14 +182,21 @@ export default function TaskDetailPage() {
         {/* 日期 + 预计时长 */}
         <View className="flex-row gap-3 mt-4">
           <View className="flex-1">
-            <Text className="text-[13px] font-medium text-gray-500 mb-1.5">日期</Text>
-            <TextInput
-              value={planDate}
-              onChangeText={setPlanDate}
-              placeholder="YYYY-MM-DD"
-              selectionColorClassName="accent-indigo-500"
-              className="bg-gray-100 rounded-2xl px-4 py-3.5 text-[16px] text-gray-900"
-            />
+            <Text className="text-[13px] font-medium text-gray-500 mb-1.5">{isGoal ? '归属周期' : '日期'}</Text>
+            {isGoal ? (
+              <View className="bg-gray-100 rounded-2xl px-4 py-3.5 flex-row items-center">
+                <FontAwesome6 name="calendar-week" size={14} color="#9CA3AF" />
+                <Text className="text-[15px] text-gray-500 ml-2">本周</Text>
+              </View>
+            ) : (
+              <TextInput
+                value={planDate}
+                onChangeText={setPlanDate}
+                placeholder="YYYY-MM-DD"
+                selectionColorClassName="accent-indigo-500"
+                className="bg-gray-100 rounded-2xl px-4 py-3.5 text-[16px] text-gray-900"
+              />
+            )}
           </View>
           <View className="flex-1">
             <Text className="text-[13px] font-medium text-gray-500 mb-1.5">预计时长</Text>
@@ -209,29 +220,40 @@ export default function TaskDetailPage() {
           className="bg-gray-100 rounded-2xl px-4 py-3.5 text-[16px] text-gray-900"
         />
 
-        {/* 类型 */}
-        <Text className="text-[13px] font-medium text-gray-500 mb-1.5 mt-4">类型</Text>
-        <View className="flex-row flex-wrap gap-2">
-          {typeOptions.map((t) => {
-            const meta = TYPE_META[t];
-            const active = t === taskType;
-            return (
-              <Pressable
-                key={t}
-                onPress={() => setTaskType(t)}
-                className="px-4 py-2 rounded-full border"
-                style={{
-                  backgroundColor: active ? `${meta.color}1F` : '#fff',
-                  borderColor: active ? meta.color : '#E5E7EB',
-                }}
-              >
-                <Text className="text-[13px] font-semibold" style={{ color: meta.color }}>
-                  {meta.name}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        {/* 类型：目标模式固定，普通模式可选择 */}
+        {isGoal ? (
+          <>
+            <Text className="text-[13px] font-medium text-gray-500 mb-1.5 mt-4">类型</Text>
+            <View className="px-3 py-2 rounded-full self-start" style={{ backgroundColor: `${TYPE_META.goal.color}1F` }}>
+              <Text className="text-[13px] font-semibold" style={{ color: TYPE_META.goal.color }}>目标</Text>
+            </View>
+          </>
+        ) : (
+          <>
+            <Text className="text-[13px] font-medium text-gray-500 mb-1.5 mt-4">类型</Text>
+            <View className="flex-row flex-wrap gap-2">
+              {typeOptions.map((t) => {
+                const meta = TYPE_META[t];
+                const active = t === taskType;
+                return (
+                  <Pressable
+                    key={t}
+                    onPress={() => setTaskType(t)}
+                    className="px-4 py-2 rounded-full border"
+                    style={{
+                      backgroundColor: active ? `${meta.color}1F` : '#fff',
+                      borderColor: active ? meta.color : '#E5E7EB',
+                    }}
+                  >
+                    <Text className="text-[13px] font-semibold" style={{ color: meta.color }}>
+                      {meta.name}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </>
+        )}
 
         {/* 状态（仅编辑显示） */}
         {isEdit && (

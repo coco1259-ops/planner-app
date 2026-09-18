@@ -14,6 +14,7 @@ export const TASK_TYPES = [
   'childcare',
   'chores',
   'personal',
+  'goal',
 ] as const;
 export type TaskType = (typeof TASK_TYPES)[number];
 export const TASK_STATUSES = ['todo', 'done', 'abandoned'] as const;
@@ -81,6 +82,37 @@ router.get('/incomplete', async (_req, res) => {
     res.json({ data });
   } catch (e) {
     res.status(500).json({ error: '获取未完成任务失败' });
+  }
+});
+
+/**
+ * 服务端文件：server/src/routes/tasks.ts
+ * 接口：GET /api/v1/tasks/range?start=YYYY-MM-DD&end=YYYY-MM-DD
+ * Query 参数：start: string (YYYY-MM-DD), end: string (YYYY-MM-DD)
+ * 说明：返回 [start, end] 日期区间内的任务（用于周计划聚合）。
+ *       若 status 传 todo，则仅返回未完成的任务。
+ */
+router.get('/range', async (req, res) => {
+  try {
+    const start = req.query.start as string | undefined;
+    const end = req.query.end as string | undefined;
+    const status = req.query.status as string | undefined;
+    if (!start || !end) {
+      return res.status(400).json({ error: '缺少 start/end 参数' });
+    }
+    let query = db
+      .from('tasks')
+      .select('*')
+      .gte('plan_date', start)
+      .lte('plan_date', end);
+    if (status) query = query.eq('status', status);
+    const { data, error } = await query
+      .order('plan_date', { ascending: true })
+      .order('time_slot', { ascending: true });
+    if (error) throw error;
+    res.json({ data });
+  } catch (e) {
+    res.status(500).json({ error: '获取周任务失败' });
   }
 });
 

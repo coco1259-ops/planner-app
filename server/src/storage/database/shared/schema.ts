@@ -1,4 +1,4 @@
-import { pgTable, serial, timestamp, varchar, text, date, index } from "drizzle-orm/pg-core"
+import { pgTable, serial, timestamp, varchar, text, date, index, uuid, uniqueIndex } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
 export const healthCheck = pgTable("health_check", {
@@ -30,3 +30,20 @@ export const tasks = pgTable(
 
 export type Task = typeof tasks.$inferSelect;
 export type InsertTask = typeof tasks.$inferInsert;
+
+export const travelDays = pgTable(
+	"travel_days",
+	{
+		id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+		weekKey: varchar("week_key", { length: 20 }).notNull(),
+		dayDate: date("day_date", { mode: "string" }).notNull(),
+		createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+	},
+	(table) => [
+		index("travel_days_week_key_idx").on(table.weekKey),
+		uniqueIndex("travel_days_week_day_unique").on(table.weekKey, table.dayDate),
+	]
+);
+
+export type TravelDay = typeof travelDays.$inferSelect;
+export type InsertTravelDay = typeof travelDays.$inferInsert;
