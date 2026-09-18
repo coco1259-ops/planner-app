@@ -14,6 +14,7 @@ export const tasks = pgTable(
 		remark: text("remark"),
 		task_type: varchar("task_type", { length: 20 }).notNull().default("light"),
 		plan_date: date("plan_date", { mode: "string" }).notNull(),
+		week_key: varchar("week_key", { length: 20 }),
 		time_slot: varchar("time_slot", { length: 10 }).notNull().default("09:00"),
 		estimated_duration: varchar("estimated_duration", { length: 40 }),
 		status: varchar("status", { length: 20 }).notNull().default("todo"),

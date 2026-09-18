@@ -23,10 +23,26 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const TODAY = () => dayjs().format('YYYY-MM-DD');
 // 计算本周周一的日期
 export const WEEK_MONDAY = () => dayjs().startOf('week').add(1, 'day').format('YYYY-MM-DD');
+// 计算下周周一：本周周一 + 7 天
+const NEXT_MONDAY = () => dayjs(WEEK_MONDAY()).add(7, 'day').format('YYYY-MM-DD');
+// 由归属周一判断其属于本周还是下周
+const PERIOD_OF_WEEK = (monday: string): 'this' | 'next' => {
+  const thisMon = WEEK_MONDAY();
+  return monday === thisMon || (monday < thisMon && monday >= dayjs(thisMon).subtract(7, 'day').format('YYYY-MM-DD'))
+    ? 'this'
+    : 'next';
+};
+
+type WeekPeriod = 'this' | 'next';
 
 export default function TaskDetailPage() {
   const router = useSafeRouter();
-  const { id, date, type } = useSafeSearchParams<{ id?: string; date?: string; type?: string }>();
+  const { id, date, type, week } = useSafeSearchParams<{
+    id?: string;
+    date?: string;
+    type?: string;
+    week?: string;
+  }>();
   const isEdit = !!id;
   const isGoal = type === 'goal';
 
@@ -38,8 +54,12 @@ export default function TaskDetailPage() {
   const [duration, setDuration] = useState('');
   const [taskType, setTaskType] = useState<TaskType>(isGoal ? 'goal' : 'deep');
   const [status, setStatus] = useState<TaskStatus>('todo');
-  // 目标模式：日期固定为本周周一；普通模式：使用传入 date 或今天
+  // 目标模式：归属周期（本周/下周）；普通模式：使用传入 date 或今天
   const [planDate, setPlanDate] = useState(date || (isGoal ? WEEK_MONDAY() : TODAY()));
+  // 目标归属周期：新建时默认取当前查看的周期（week 参数），否则根据 plan_date 判断
+  const [goalPeriod, setGoalPeriod] = useState<WeekPeriod>(
+    isGoal ? (week === 'next' ? 'next' : PERIOD_OF_WEEK(isEdit ? '' : date || WEEK_MONDAY()) === 'next' ? 'next' : 'this') : 'this',
+  );
 
   const load = useCallback(async () => {
     if (!isEdit || !id) return;
@@ -53,6 +73,10 @@ export default function TaskDetailPage() {
       setTaskType(t.task_type);
       setStatus(t.status);
       setPlanDate(t.plan_date);
+      // 目标回显归属周期
+      if (isGoal) {
+        setGoalPeriod(t.week_key ? PERIOD_OF_WEEK(t.week_key) : t.plan_date >= NEXT_MONDAY() ? 'next' : 'this');
+      }
     } catch (e) {
       Alert.alert('错误', '加载任务失败');
     } finally {
@@ -92,10 +116,13 @@ export default function TaskDetailPage() {
     }
     setSaving(true);
     try {
+      // 目标：plan_date 与 week_key 均取归属周周一
+      const goalMonday = goalPeriod === 'next' ? NEXT_MONDAY() : WEEK_MONDAY();
       const payload = {
         title: trimmed,
         remark: remark.trim() || null,
-        plan_date: planDate,
+        plan_date: isGoal ? goalMonday : planDate,
+        week_key: isGoal ? goalMonday : null,
         time_slot: finalSlot,
         estimated_duration: duration.trim() || null,
         task_type: taskType,
@@ -184,9 +211,27 @@ export default function TaskDetailPage() {
           <View className="flex-1">
             <Text className="text-[13px] font-medium text-gray-500 mb-1.5">{isGoal ? '归属周期' : '日期'}</Text>
             {isGoal ? (
-              <View className="bg-gray-100 rounded-2xl px-4 py-3.5 flex-row items-center">
-                <FontAwesome6 name="calendar-week" size={14} color="#9CA3AF" />
-                <Text className="text-[15px] text-gray-500 ml-2">本周</Text>
+              <View className="bg-gray-100 rounded-2xl p-1 flex-row">
+                {(
+                  [
+                    { key: 'this', label: '本周' },
+                    { key: 'next', label: '下周' },
+                  ] as { key: WeekPeriod; label: string }[]
+                ).map((p) => {
+                  const active = goalPeriod === p.key;
+                  return (
+                    <Pressable
+                      key={p.key}
+                      onPress={() => setGoalPeriod(p.key)}
+                      className="flex-1 py-2 rounded-xl items-center"
+                      style={{ backgroundColor: active ? '#4F46E5' : 'transparent' }}
+                    >
+                      <Text className="text-[13px] font-semibold" style={{ color: active ? '#fff' : '#6B7280' }}>
+                        {p.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
               </View>
             ) : (
               <TextInput

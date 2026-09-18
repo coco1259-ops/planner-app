@@ -22,6 +22,7 @@ export interface Task {
   remark: string | null;
   task_type: TaskType;
   plan_date: string; // YYYY-MM-DD
+  week_key?: string | null; // 归属周（该周周一），用于"目标"类型按周过滤
   time_slot: string; // HH:MM
   estimated_duration?: string | null; // 如 "30分钟" / "1小时"
   status: TaskStatus;
@@ -87,10 +88,14 @@ export const api = {
   /**
    * 服务端文件：server/src/routes/tasks.ts
    * 接口：GET /api/v1/tasks/range
-   * Query 参数：start: string (YYYY-MM-DD), end: string (YYYY-MM-DD), status?: 'todo'
+   * Query 参数：start: string (YYYY-MM-DD), end: string (YYYY-MM-DD), status?: 'todo', weekKey?: string (该周周一)
    */
-  listRange: (start: string, end: string, status?: 'todo') =>
-    request<{ data: Task[] }>(`/api/v1/tasks/range?start=${start}&end=${end}${status ? `&status=${status}` : ''}`),
+  listRange: (start: string, end: string, status?: 'todo', weekKey?: string) =>
+    request<{ data: Task[] }>(
+      `/api/v1/tasks/range?start=${start}&end=${end}${status ? `&status=${status}` : ''}${
+        weekKey ? `&weekKey=${weekKey}` : ''
+      }`,
+    ),
 
   getTask: (id: string) => request<{ data: Task }>(`/api/v1/tasks/${id}`),
 

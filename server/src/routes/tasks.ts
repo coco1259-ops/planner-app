@@ -5,6 +5,17 @@ import { getSupabaseClient } from '../storage/database/supabase-client';
 const router = Router();
 const db = getSupabaseClient();
 
+// 返回当前周的周一日期（YYYY-MM-DD），作为"归属周"标识
+function getMondayOfWeek(now: Date = new Date()): string {
+  const d = new Date(now);
+  // getDay()：0=周日 .. 6=周六；周一偏移到本周一
+  d.setDate(d.getDate() + ((1 - d.getDay() + 7) % 7));
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 export const TASK_TYPES = [
   'deep',
   'light',
@@ -28,6 +39,7 @@ const createSchema = z.object({
   remark: z.string().trim().max(500).optional().nullable(),
   task_type: z.enum(TASK_TYPES).default('light'),
   plan_date: z.string().regex(datePattern, 'plan_date must be YYYY-MM-DD'),
+  week_key: z.string().regex(datePattern, 'week_key must be YYYY-MM-DD').optional().nullable(),
   time_slot: z.string().regex(timeSlotPattern, 'time_slot must be HH:MM or HH:MM-HH:MM').default('09:00'),
   estimated_duration: z.string().trim().max(40).nullish(),
 });
@@ -37,6 +49,7 @@ const updateSchema = z.object({
   remark: z.string().trim().max(500).nullable().optional(),
   task_type: z.enum(TASK_TYPES).optional(),
   plan_date: z.string().regex(datePattern, 'plan_date must be YYYY-MM-DD').optional(),
+  week_key: z.string().regex(datePattern, 'week_key must be YYYY-MM-DD').nullable().optional(),
   time_slot: z.string().regex(timeSlotPattern, 'time_slot must be HH:MM or HH:MM-HH:MM').optional(),
   estimated_duration: z.string().trim().max(40).nullable().optional(),
   status: z.enum(TASK_STATUSES).optional(),
@@ -87,9 +100,10 @@ router.get('/incomplete', async (_req, res) => {
 
 /**
  * 服务端文件：server/src/routes/tasks.ts
- * 接口：GET /api/v1/tasks/range?start=YYYY-MM-DD&end=YYYY-MM-DD
- * Query 参数：start: string (YYYY-MM-DD), end: string (YYYY-MM-DD)
- * 说明：返回 [start, end] 日期区间内的任务（用于周计划聚合）。
+ * 接口：GET /api/v1/tasks/range?start=YYYY-MM-DD&end=YYYY-MM-DD[&status=todo][&weekKey=YYYY-MM-DD]
+ * Query 参数：start: string (YYYY-MM-DD), end: string (YYYY-MM-DD), status?: 'todo', weekKey?: string (该周周一)
+ * 说明：返回 [start, end] 日期区间内的任务。若传 weekKey，则额外用 task_type='goal' &
+ *       week_key=weekKey 匹配的"目标"任务归并进来（目标按归属周过滤，不看 plan_date）。
  *       若 status 传 todo，则仅返回未完成的任务。
  */
 router.get('/range', async (req, res) => {
@@ -97,6 +111,7 @@ router.get('/range', async (req, res) => {
     const start = req.query.start as string | undefined;
     const end = req.query.end as string | undefined;
     const status = req.query.status as string | undefined;
+    const weekKey = req.query.weekKey as string | undefined;
     if (!start || !end) {
       return res.status(400).json({ error: '缺少 start/end 参数' });
     }
@@ -106,11 +121,29 @@ router.get('/range', async (req, res) => {
       .gte('plan_date', start)
       .lte('plan_date', end);
     if (status) query = query.eq('status', status);
-    const { data, error } = await query
+    const { data: rangeTasks, error: err1 } = await query
       .order('plan_date', { ascending: true })
       .order('time_slot', { ascending: true });
-    if (error) throw error;
-    res.json({ data });
+    if (err1) throw err1;
+
+    // 若指定 weekKey：将目标（归属周=weekKey）归并，保证目标区完整展示
+    let tasks = rangeTasks ?? [];
+    if (weekKey) {
+      const { data: goalTasks, error: err2 } = await db
+        .from('tasks')
+        .select('*')
+        .eq('task_type', 'goal')
+        .eq('week_key', weekKey)
+        .eq('plan_date', start); // 目标 plan_date = 该周周一
+      if (err2) throw err2;
+      const existing = new Set(tasks.map((t) => t.id));
+      tasks = [...tasks, ...(goalTasks ?? []).filter((g) => !existing.has(g.id))];
+      tasks.sort((a, b) =>
+        a.plan_date === b.plan_date ? (a.time_slot < b.time_slot ? -1 : 1) : a.plan_date < b.plan_date ? -1 : 1,
+      );
+    }
+
+    res.json({ data: tasks });
   } catch (e) {
     res.status(500).json({ error: '获取周任务失败' });
   }
@@ -148,7 +181,12 @@ router.post('/', async (req, res) => {
     }
     const { data, error } = await db
       .from('tasks')
-      .insert({ ...parsed.data, status: 'todo' })
+      .insert({
+        ...parsed.data,
+        // goal(目标) 类型若未显式传 week_key，则默认归属当前周的周一
+        week_key: parsed.data.week_key ?? (parsed.data.task_type === 'goal' ? getMondayOfWeek() : null),
+        status: 'todo',
+      })
       .select()
       .single();
     if (error) throw error;

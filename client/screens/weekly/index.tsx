@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -25,16 +25,32 @@ const API_BASE = (process.env.EXPO_PUBLIC_BACKEND_BASE_URL ?? '').replace(/\/$/,
 const WEEK_MONDAY = () => dayjs().startOf('week').add(1, 'day').format('YYYY-MM-DD');
 // 本周周日日期
 const WEEK_SUNDAY = () => dayjs().startOf('week').add(7, 'day').format('YYYY-MM-DD');
+// 下周周一（本周周一 + 7 天）
+const NEXT_MONDAY = () => dayjs(WEEK_MONDAY()).add(7, 'day').format('YYYY-MM-DD');
+// 下周周日
+const NEXT_SUNDAY = () => dayjs(WEEK_MONDAY()).add(13, 'day').format('YYYY-MM-DD');
+
+// 依据当前所选周期算出 [monday, sunday]
+function rangeForPeriod(period: 'this' | 'next'): { monday: string; sunday: string } {
+  return period === 'next'
+    ? { monday: NEXT_MONDAY(), sunday: NEXT_SUNDAY() }
+    : { monday: WEEK_MONDAY(), sunday: WEEK_SUNDAY() };
+}
 
 const WEEK_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
-function weekDays(): string[] {
-  const monday = dayjs().startOf('week').add(1, 'day');
-  return Array.from({ length: 7 }, (_, i) => monday.add(i, 'day').format('YYYY-MM-DD'));
+function weekDays(monday: string): string[] {
+  const base = dayjs(monday);
+  return Array.from({ length: 7 }, (_, i) => base.add(i, 'day').format('YYYY-MM-DD'));
 }
+
+type Period = 'this' | 'next';
 
 export default function WeeklyPage() {
   const router = useSafeRouter();
+
+  // 周期切换（本周 / 下周）
+  const [period, setPeriod] = useState<Period>('this');
 
   // 出行日
   const [travelDays, setTravelDays] = useState<string[]>([]);
@@ -43,8 +59,6 @@ export default function WeeklyPage() {
 
   // 本周目标
   const [goals, setGoals] = useState<Task[]>([]);
-  // 未完成任务
-  const [incomplete, setIncomplete] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
 
   // 对话
@@ -54,9 +68,8 @@ export default function WeeklyPage() {
   const chatRef = useRef<ChatMsg[]>([]);
   const [createdToast, setCreatedToast] = useState<string | null>(null);
 
-  const monday = WEEK_MONDAY();
-  const sunday = WEEK_SUNDAY();
-  const daysThisWeek = useMemo(() => weekDays(), []);
+  const { monday, sunday } = rangeForPeriod(period);
+  const daysInPeriod = useMemo(() => weekDays(monday), [monday]);
 
   const fetchTravelDays = useCallback(async () => {
     try {
@@ -69,13 +82,15 @@ export default function WeeklyPage() {
 
   const fetchWeekly = useCallback(async () => {
     try {
-      // 本周目标：指定周内 task_type=goal（plan_date 落于本周）
-      const goalRes = await api.listRange(monday, sunday, undefined);
+      // 当前周期目标：task_type=goal 且 归属周=weekKey（plan_date 落于本周）
+      const goalRes = await api.listRange(
+        monday,
+        sunday,
+        undefined,
+        monday, // weekKey，用于归并"目标"
+      );
       const all = goalRes.data;
       setGoals(all.filter((t) => t.task_type === 'goal'));
-      // 未完成任务：当前周 status=todo 且非目标
-      const todoRes = await api.listRange(monday, sunday, 'todo');
-      setIncomplete(todoRes.data.filter((t) => t.task_type !== 'goal'));
     } catch {
       /* ignore */
     } finally {
@@ -90,6 +105,16 @@ export default function WeeklyPage() {
       fetchWeekly();
     }, [fetchTravelDays, fetchWeekly]),
   );
+
+  // 切换周期后重载数据
+  useEffect(() => {
+    setLoading(true);
+    setTravelDays([]);
+    setGoals([]);
+    fetchTravelDays();
+    fetchWeekly();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [period]);
 
   const openTravelEditor = () => {
     setTravelDraft(new Set(travelDays));
@@ -177,22 +202,24 @@ export default function WeeklyPage() {
 
   const doneGoals = goals.filter((g) => g.status === 'done').length;
   const travelWeekDayNames = useMemo(() => {
-    return daysThisWeek
+    return daysInPeriod
       .filter((d) => travelDays.includes(d))
       .map((d) => {
-        const idx = daysThisWeek.indexOf(d);
+        const idx = daysInPeriod.indexOf(d);
         return WEEK_LABELS[idx];
       });
-  }, [travelDays, daysThisWeek]);
+  }, [travelDays, daysInPeriod]);
 
   return (
     <Screen>
       <View className="flex-1">
-        {/* 顶部标题 */}
+        {/* 顶部标题 + 周期切换 */}
         <View className="px-4 pt-4 pb-2 bg-transparent">
-          <View className="flex-row items-center justify-between">
+          <View className="flex-row items-center justify-between mb-3">
             <View>
-              <Text className="text-[22px] font-bold text-gray-900">本周计划</Text>
+              <Text className="text-[22px] font-bold text-gray-900">
+                {period === 'next' ? '下周计划' : '本周计划'}
+              </Text>
               <Text className="text-[12px] text-gray-400 mt-0.5">
                 {dayjs(monday).format('M月D日')} - {dayjs(sunday).format('M月D日')}
               </Text>
@@ -203,6 +230,29 @@ export default function WeeklyPage() {
                 目标 {doneGoals}/{goals.length}
               </Text>
             </View>
+          </View>
+          {/* 周期切换器 */}
+          <View className="bg-gray-100 rounded-full flex-row p-1">
+            {(
+              [
+                { key: 'this', label: '本周' },
+                { key: 'next', label: '下周' },
+              ] as { key: Period; label: string }[]
+            ).map((p) => {
+              const active = period === p.key;
+              return (
+                <Pressable
+                  key={p.key}
+                  onPress={() => setPeriod(p.key)}
+                  className="flex-1 py-2 rounded-full items-center"
+                  style={{ backgroundColor: active ? '#4F46E5' : 'transparent' }}
+                >
+                  <Text className="text-[13px] font-semibold" style={{ color: active ? '#fff' : '#6B7280' }}>
+                    {p.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </View>
         </View>
 
@@ -224,7 +274,9 @@ export default function WeeklyPage() {
                   <View className="w-8 h-8 rounded-xl bg-indigo-50 items-center justify-center">
                     <FontAwesome6 name="car-side" size={15} color="#4F46E5" />
                   </View>
-                  <Text className="text-[15px] font-semibold text-gray-800">本周出行日</Text>
+                  <Text className="text-[15px] font-semibold text-gray-800">
+                    {period === 'next' ? '下周出行日' : '本周出行日'}
+                  </Text>
                 </View>
                 <TouchableOpacity onPress={openTravelEditor} className="px-3 py-1.5 rounded-full bg-indigo-50">
                   <Text className="text-[12px] font-semibold text-indigo-600">编辑</Text>
@@ -241,10 +293,10 @@ export default function WeeklyPage() {
               </View>
             </View>
 
-            {/* 本周目标区 */}
+            {/* 目标区 */}
             <Text className="text-[13px] font-semibold text-gray-500 mb-2 flex-row items-center gap-1.5 px-1">
               <FontAwesome6 name="bullseye" size={12} color="#F59E0B" style={{ marginRight: 6 }} />
-              本周核心目标
+              {period === 'next' ? '下周核心目标' : '本周核心目标'}
             </Text>
             {goals.length === 0 ? (
               <View className="bg-amber-50 rounded-2xl px-5 py-6 items-center mb-4">
@@ -252,15 +304,21 @@ export default function WeeklyPage() {
                   <FontAwesome6 name="bullseye" size={20} color="#D97706" />
                 </View>
                 <Text className="text-[14px] text-gray-600 text-center leading-6">
-                  本周还没有目标，{'\n'}周日晚上用一句话告诉我下周要冲什么
+                  {period === 'next'
+                    ? '下周还没排，\n周日晚上跟我说一声就行'
+                    : '本周还没有目标，\n周日晚上用一句话告诉我下周要冲什么'}
                 </Text>
                 <TouchableOpacity
-                  onPress={() => router.push('/task-detail', { type: 'goal', date: monday })}
+                  onPress={() =>
+                    router.push('/task-detail', { type: 'goal', date: monday, week: period })
+                  }
                   className="mt-4 px-5 py-2.5 rounded-full flex-row items-center"
                   style={{ backgroundColor: '#4F46E5' }}
                 >
                   <FontAwesome6 name="plus" size={13} color="#fff" />
-                  <Text className="text-white text-[13px] font-semibold ml-1.5">添加本周目标</Text>
+                  <Text className="text-white text-[13px] font-semibold ml-1.5">
+                    {period === 'next' ? '添加下周目标' : '添加本周目标'}
+                  </Text>
                 </TouchableOpacity>
               </View>
             ) : (
@@ -298,7 +356,7 @@ export default function WeeklyPage() {
                         hitSlop={8}
                         onPress={(e) => {
                           e.stopPropagation();
-                          router.push('/task-detail', { id: g.id, type: 'goal' });
+                          router.push('/task-detail', { id: g.id, type: 'goal', week: period });
                         }}
                         className="ml-2 items-center justify-center"
                         style={{ width: 16 }}
@@ -309,60 +367,16 @@ export default function WeeklyPage() {
                   );
                 })}
                 <TouchableOpacity
-                  onPress={() => router.push('/task-detail', { type: 'goal', date: monday })}
+                  onPress={() =>
+                    router.push('/task-detail', { type: 'goal', date: monday, week: period })
+                  }
                   className="mt-1 py-3 rounded-2xl border border-dashed items-center"
                   style={{ borderColor: '#E5E7EB' }}
                 >
-                  <Text className="text-[13px] font-medium text-indigo-500"> + 添加本周目标</Text>
+                  <Text className="text-[13px] font-medium text-indigo-500">
+                    {period === 'next' ? ' + 添加下周目标' : ' + 添加本周目标'}
+                  </Text>
                 </TouchableOpacity>
-              </View>
-            )}
-
-            {/* 未完成聚合区 */}
-            <View className="flex-row items-center gap-2 px-1 mb-2 mt-1">
-              <FontAwesome6 name="hourglass-half" size={12} color="#F97316" />
-              <Text className="text-[13px] font-semibold text-gray-500">未完成的任务</Text>
-              <View className="flex-1 h-px bg-gray-200" />
-              <Text className="text-[11px] text-gray-400">{incomplete.length} 项</Text>
-            </View>
-            {incomplete.length === 0 ? (
-              <View className="bg-emerald-50 rounded-2xl px-5 py-6 items-center mb-4">
-                <FontAwesome6 name="party-horn" size={22} color="#059669" />
-                <Text className="text-[14px] text-gray-600 mt-2.5">这一周都完成了 🎉</Text>
-              </View>
-            ) : (
-              <View className="mb-4">
-                {incomplete.map((t) => {
-                  const meta = TYPE_META[t.task_type];
-                  const label = t.plan_date === dayjs().format('YYYY-MM-DD') ? '今天' :
-                    dayjs(t.plan_date).format('周' + ['日', '一', '二', '三', '四', '五', '六'][dayjs(t.plan_date).day()]);
-                  return (
-                    <Pressable
-                      key={t.id}
-                      onPress={() => router.push('/task-detail', { id: t.id })}
-                      className="bg-white rounded-2xl px-4 py-3 flex-row items-center mb-2 border"
-                      style={{ borderColor: '#F0F0F3', shadowColor: '#000', shadowOpacity: 0.03, shadowOffset: { width: 0, height: 2 }, shadowRadius: 5 }}
-                    >
-                      <View className="w-[64px]">
-                        <Text className="text-[11px] text-gray-400">{label}</Text>
-                        <Text className="text-[14px] font-semibold text-gray-800 mt-0.5">{t.time_slot}</Text>
-                        {!!t.estimated_duration && (
-                          <Text className="text-[10px] text-gray-400 mt-0.5">{t.estimated_duration}</Text>
-                        )}
-                      </View>
-                      <View className="flex-1 pr-2">
-                        <Text className="text-[15px] font-medium text-gray-900" numberOfLines={2}>{t.title}</Text>
-                        {!!t.remark && <Text className="text-[11px] text-gray-400 mt-0.5" numberOfLines={1}>{t.remark}</Text>}
-                      </View>
-                      <View className="px-2 py-1 rounded-full" style={{ backgroundColor: `${meta.color}1F` }}>
-                        <Text className="text-[11px] font-semibold" style={{ color: meta.color }}>{meta.name}</Text>
-                      </View>
-                      <View className="ml-1.5 items-center justify-center" style={{ width: 16 }}>
-                        <FontAwesome6 name="chevron-right" size={12} color="#B0B7C3" />
-                      </View>
-                    </Pressable>
-                  );
-                })}
               </View>
             )}
           </ScrollView>
@@ -374,14 +388,16 @@ export default function WeeklyPage() {
             <View className="flex-1 justify-end" style={{ backgroundColor: 'rgba(0,0,0,0.35)' }}>
               <View className="bg-white rounded-t-3xl px-5 pt-5 pb-8">
                 <View className="flex-row items-center justify-between mb-4">
-                  <Text className="text-[17px] font-bold text-gray-900">本周出行日</Text>
+                  <Text className="text-[17px] font-bold text-gray-900">
+                    {period === 'next' ? '下周出行日' : '本周出行日'}
+                  </Text>
                   <TouchableOpacity onPress={() => setTravelEditorVisible(false)} hitSlop={10} className="p-1">
                     <FontAwesome6 name="xmark" size={18} color="#4B5563" />
                   </TouchableOpacity>
                 </View>
                 <Text className="text-[13px] text-gray-500 mb-3">点击日期按钮，切换「工作日 / 出行日」</Text>
                 <View className="flex-row flex-wrap gap-2">
-                  {daysThisWeek.map((d, i) => {
+                  {daysInPeriod.map((d, i) => {
                     const isTravel = travelDraft.has(d);
                     return (
                       <Pressable
