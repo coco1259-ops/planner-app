@@ -33,7 +33,7 @@ export default function TaskDetailPage() {
   const [remark, setRemark] = useState('');
   const [timeSlot, setTimeSlot] = useState('');
   const [duration, setDuration] = useState('');
-  const [taskType, setTaskType] = useState<TaskType>('work');
+  const [taskType, setTaskType] = useState<TaskType>('deep');
   const [status, setStatus] = useState<TaskStatus>('todo');
   const [planDate, setPlanDate] = useState(date || TODAY());
 

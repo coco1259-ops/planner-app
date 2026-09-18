@@ -28,20 +28,28 @@ export interface Task {
   updated_at: string;
 }
 
+// 统一为 4 类：深度 / 轻度 / 个人 / 学习
+// 旧类型（work/childcare/chores/family）归一映射到新类，保证历史数据统一显示：
+//   work(工作)      -> deep   (深度)
+//   childcare(带娃) -> light  (轻度)
+//   chores(家务)    -> light  (轻度)
+//   family(家庭)    -> personal(个人)
+// 颜色：深度使用醒目的红橙色，其余（轻度绿 / 个人紫 / 学习青）协调统一
 export const TYPE_META: Record<TaskType, { name: string; color: string }> = {
-  work: { name: '工作', color: '#3B82F6' },
-  childcare: { name: '带娃', color: '#EC4899' },
-  chores: { name: '家务', color: '#F97316' },
+  // 新 4 类（主类型）
+  deep: { name: '深度', color: '#EF4444' },
+  light: { name: '轻度', color: '#22C55E' },
   personal: { name: '个人', color: '#A855F7' },
   study: { name: '学习', color: '#14B8A6' },
-  // 兼容旧数据回显
-  deep: { name: '深度', color: '#3B82F6' },
-  light: { name: '轻任务', color: '#22C55E' },
-  family: { name: '家庭', color: '#F97316' },
+  // 旧类型归一映射（保持历史数据回显一致）
+  work: { name: '深度', color: '#EF4444' },
+  childcare: { name: '轻度', color: '#22C55E' },
+  chores: { name: '轻度', color: '#22C55E' },
+  family: { name: '个人', color: '#A855F7' },
 };
 
-// 新建/编辑时的类型选项（新 5 类）
-export const TYPE_ORDER: TaskType[] = ['work', 'childcare', 'chores', 'personal', 'study'];
+// 新建/编辑时的可选类型：深度 / 轻度 / 个人 / 学习
+export const TYPE_ORDER: TaskType[] = ['deep', 'light', 'personal', 'study'];
 
 export const STATUS_META: Record<TaskStatus, { name: string; color: string }> = {
   todo: { name: '未做', color: '#F97316' },
