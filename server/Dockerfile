@@ -22,5 +22,7 @@ COPY package.json ./
 RUN pnpm install --prod --no-frozen-lockfile
 # 复制构建产物
 COPY --from=builder /app/dist ./dist
+# 复制前端静态页面（index.html/_expo/icon 等，供 / 打开）
+COPY --from=builder /app/public ./public
 EXPOSE 9091
 CMD ["node", "dist/index.js"]
