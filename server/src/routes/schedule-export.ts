@@ -53,17 +53,22 @@ router.get('/', async (_req, res) => {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, '内容排期');
     const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
-
-    // 上传对象存储，返回签名 URL（导出只读，不写入 schedule 表）
+    const base64 = buffer.toString('base64');
     const fileName = `schedule_export_${Date.now()}.xlsx`;
-    const key = await storage.uploadFile({
-      fileContent: buffer,
-      fileName,
-      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    });
-    const downloadUrl = await storage.generatePresignedUrl({ key, expireTime: 86400 });
 
-    res.json({ downloadUrl, fileName });
+    // 优先上传对象存储返回签名 URL；失败则降级返回 base64，由前端生成可下载文件
+    try {
+      const key = await storage.uploadFile({
+        fileContent: buffer,
+        fileName,
+        contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const downloadUrl = await storage.generatePresignedUrl({ key, expireTime: 86400 });
+      return res.json({ downloadUrl, fileName });
+    } catch (storageErr) {
+      console.error('对象存储上传失败，降级返回 base64', storageErr);
+      return res.json({ downloadUrl: '', fileName, base64 });
+    }
   } catch (e) {
     console.error('导出排期失败', e);
     res.status(500).json({ error: '导出排期失败' });

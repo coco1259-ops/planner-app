@@ -197,9 +197,10 @@ export const api = {
   /**
    * 服务端文件：server/src/routes/schedule-export.ts
    * 接口：GET /api/v1/schedule/export
-   * 说明：导出全部排期为 xlsx，返回签名下载 URL
+   * 说明：导出全部排期为 xlsx。返回 downloadUrl(签名URL) 或 base64(对象存储降级)
    */
-  exportSchedule: () => request<{ downloadUrl: string; fileName: string }>('/api/v1/schedule/export'),
+  exportSchedule: () =>
+    request<{ downloadUrl: string; fileName: string; base64?: string }>('/api/v1/schedule/export'),
 
   /**
    * 服务端文件：server/src/routes/schedule.ts

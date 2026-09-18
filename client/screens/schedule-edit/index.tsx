@@ -18,6 +18,14 @@ import { api, SCHEDULE_STAGES, ScheduleItem, SchedulePayload, ScheduleStage, Sch
 const TYPE_OPTIONS: ScheduleType[] = ['商单', '科普选题'];
 const TYPE_COLOR: Record<string, string> = { 商单: '#4F46E5', 科普选题: '#0EA5E9' };
 
+// 将 base64 xlsx 转为 Blob（仅 Web 端使用）
+function base64ToBlob(b64: string): Blob {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+}
+
 export default function ScheduleEditPage() {
   const router = useSafeRouter();
   const { id } = useSafeSearchParams<{ id?: string }>();
@@ -136,23 +144,36 @@ export default function ScheduleEditPage() {
   const handleExport = async () => {
     try {
       setExporting(true);
-      const { downloadUrl, fileName } = await api.exportSchedule();
-      // Web 端优先尝试系统分享面板（可发微信等）；原生端暂不支持则降级为提示
+      const { downloadUrl, fileName, base64 } = await api.exportSchedule();
+      const finalUrl =
+        downloadUrl ||
+        (base64 && Platform.OS === 'web'
+          ? URL.createObjectURL(base64ToBlob(base64))
+          : '');
+      if (!finalUrl) {
+        if (Platform.OS !== 'web') {
+          Alert.alert('导出成功', `文件已生成：${fileName}\n数据已编码，请在网页端使用`);
+        } else {
+          Alert.alert('提示', '导出失败，请重试');
+        }
+        return;
+      }
+      // Web 端优先尝试系统分享面板（可发微信等）
       if (Platform.OS === 'web') {
         const nav: any = (globalThis as any).navigator;
         if (typeof nav?.share === 'function') {
           try {
-            await nav.share({ title: '内容排期表', text: '内容排期表已导出', url: downloadUrl });
+            await nav.share({ title: '内容排期表', text: '内容排期表已导出', url: finalUrl });
             return;
           } catch (shareErr: any) {
             if (shareErr?.name === 'AbortError') return;
-            triggerDownload(downloadUrl, fileName);
+            triggerDownload(finalUrl, fileName);
           }
         } else {
-          triggerDownload(downloadUrl, fileName);
+          triggerDownload(finalUrl, fileName);
         }
       } else {
-        Alert.alert('导出成功', `文件已生成：${fileName}\n请在网页端打开链接下载：\n${downloadUrl}`);
+        Alert.alert('导出成功', `文件已生成：${fileName}\n请在网页端打开，或使用分享下载：\n${finalUrl}`);
       }
     } catch {
       Alert.alert('提示', '导出失败，请重试');
