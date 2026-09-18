@@ -5,6 +5,24 @@ import { getSupabaseClient } from '../storage/database/supabase-client';
 
 const router = Router();
 
+/**
+ * 构建内置大脑的 LLM Client。
+ * - 本地/沙箱：coze 运行时会自动注入 COZE_INTEGRATION_MODEL_BASE_URL 等凭据，直接 new Config() 即可；
+ * - 线上部署（Railway 等）：coze 不会注入这些 env，需在运行环境显式配置
+ *   PLAN_MODEL_BASE_URL（OpenAI 兼容模型端点）与 PLAN_MODEL_API_KEY，
+ *   这里用显式 Config 注入，保证模型调用在生产同样可用。
+ */
+function buildLLMClient(reqHeaders: Record<string, string>): LLMClient {
+  const forwardHeaders = HeaderUtils.extractForwardHeaders(reqHeaders);
+  const explicitBaseUrl = process.env.PLAN_MODEL_BASE_URL;
+  const explicitKey = process.env.PLAN_MODEL_API_KEY;
+  if (explicitBaseUrl && explicitKey) {
+    return new LLMClient(new Config({ modelBaseUrl: explicitBaseUrl, apiKey: explicitKey }), forwardHeaders);
+  }
+  // 缺显式配置时回退到 coze 注入 env（本地/沙箱）
+  return new LLMClient(new Config(), forwardHeaders);
+}
+
 const SYSTEM_PROMPT = `# 角色
 你是龙水林的日程计划管家。龙水林：独自带娃的宝爸，母婴自媒体创作者（一人+3个AI员工的虚拟团队）。他的时间极度稀缺，你存在的唯一价值：保护他的整块时间不被侵蚀。
 
@@ -121,9 +139,7 @@ router.post('/plan', async (req, res) => {
   ];
 
   try {
-    const customHeaders = HeaderUtils.extractForwardHeaders(req.headers as Record<string, string>);
-    const config = new Config();
-    const client = new LLMClient(config, customHeaders);
+    const client = buildLLMClient(req.headers as Record<string, string>);
 
     // 用内置「计划管家」流式输出（不再依赖外部 agent）
     let assistantReply = '';
@@ -179,6 +195,7 @@ router.post('/plan', async (req, res) => {
     res.write('data: [DONE]\n\n');
     res.end();
   } catch (e) {
+    console.error('chat/plan error:', e instanceof Error ? e.stack || e.message : e);
     if (!res.headersSent) {
       res.status(500).json({ error: '计划管家暂时不可用' });
     } else {
