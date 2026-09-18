@@ -1,4 +1,4 @@
-import { pgTable, serial, timestamp, varchar, text, date, index, uuid, uniqueIndex } from "drizzle-orm/pg-core"
+import { pgTable, serial, timestamp, varchar, text, date, index, uuid, uniqueIndex, jsonb } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
 export const healthCheck = pgTable("health_check", {
@@ -48,3 +48,23 @@ export const travelDays = pgTable(
 
 export type TravelDay = typeof travelDays.$inferSelect;
 export type InsertTravelDay = typeof travelDays.$inferInsert;
+
+export const schedule = pgTable(
+	"schedule",
+	{
+		id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+		projectName: varchar("project_name", { length: 200 }).notNull(),
+		scheduleType: varchar("schedule_type", { length: 20 }).notNull().default("商单"),
+		clientName: varchar("client_name", { length: 200 }).notNull().default(""),
+		pubDate: date("pub_date", { mode: "string" }),
+		stages: jsonb("stages").notNull().default({}),
+		createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+		updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+	},
+	(table) => [
+		index("schedule_pub_date_idx").on(table.pubDate),
+	]
+);
+
+export type Schedule = typeof schedule.$inferSelect;
+export type InsertSchedule = typeof schedule.$inferInsert;

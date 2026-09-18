@@ -8,6 +8,8 @@ import statsRouter from "./routes/stats";
 import chatRouter from "./routes/chat";
 import voiceRouter from "./routes/voice";
 import travelDaysRouter from "./routes/travel-days";
+import scheduleRouter from "./routes/schedule";
+import scheduleExportRouter from "./routes/schedule-export";
 
 const app = express();
 const port = process.env.PORT || 9091;
@@ -30,6 +32,9 @@ app.use('/api/v1/stats', statsRouter);
 app.use('/api/v1/chat', chatRouter);
 app.use('/api/v1/voice', voiceRouter);
 app.use('/api/v1/travel-days', travelDaysRouter);
+// 注意：export 必须先于 /schedule 挂载，避免被 schedule 的 /:id 动态路由吞掉
+app.use('/api/v1/schedule/export', scheduleExportRouter);
+app.use('/api/v1/schedule', scheduleRouter);
 
 // ---- 托管前端 Web 静态页面（便于手机浏览器直接访问 / 打开 App）----
 const webDist = path.join(__dirname, "..", "public");

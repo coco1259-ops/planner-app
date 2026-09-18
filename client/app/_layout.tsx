@@ -24,6 +24,7 @@ export default function RootLayout() {
       >
         <Stack.Screen name="(tabs)" options={{ title: "" }} />
         <Stack.Screen name="task-detail" options={{ title: "任务详情" }} />
+        <Stack.Screen name="schedule-edit" options={{ title: "排期详情" }} />
         <Stack.Screen name="+not-found" />
       </Stack>
       <Toast />

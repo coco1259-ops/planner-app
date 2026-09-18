@@ -68,6 +68,13 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <FontAwesome6 name="calendar-week" size={20} color={color} />,
         }}
       />
+      <Tabs.Screen
+        name="schedule"
+        options={{
+          title: '排期',
+          tabBarIcon: ({ color }) => <FontAwesome6 name="table-cells" size={20} color={color} />,
+        }}
+      />
     </Tabs>
   );
 }

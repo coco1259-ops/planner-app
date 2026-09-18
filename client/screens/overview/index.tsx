@@ -1,8 +1,9 @@
 import { useCallback, useMemo, useState } from 'react';
-import { View, Text, ActivityIndicator, ScrollView } from 'react-native';
+import { View, Text, ActivityIndicator, ScrollView, Pressable } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import Svg, { Polyline, Circle, Line, Text as SvgText } from 'react-native-svg';
 import { Screen } from '@/components/Screen';
+import { useSafeRouter } from '@/hooks/useSafeRouter';
 import { api } from '@/utils/api';
 
 type OverviewData = Awaited<ReturnType<typeof api.overview>>;
@@ -87,8 +88,10 @@ function DonutChart({
 }
 
 export default function OverviewPage() {
+  const router = useSafeRouter();
   const [data, setData] = useState<OverviewData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [pipeline, setPipeline] = useState<{ total: number; stages: { stage: string; count: number }[] } | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
@@ -98,6 +101,12 @@ export default function OverviewPage() {
       /* ignore */
     } finally {
       setLoading(false);
+    }
+    try {
+      const p = await api.schedulePipeline();
+      setPipeline(p);
+    } catch {
+      /* ignore */
     }
   }, []);
 
@@ -142,6 +151,23 @@ export default function OverviewPage() {
             </View>
           ))}
         </View>
+
+        {/* 内容管线统计（7天内到期的未完成阶段） */}
+        <Pressable
+          onPress={() => router.push('/schedule')}
+          className="bg-white rounded-2xl px-4 py-4 mb-3"
+          style={{ shadowColor: '#4F46E5', shadowOpacity: 0.06, shadowOffset: { width: 0, height: 2 }, shadowRadius: 6 }}
+        >
+          <View className="flex-row items-center justify-between">
+            <Text className="text-[14px] font-semibold text-gray-800">内容管线</Text>
+            <Text className="text-[12px] text-indigo-500">查看排期 →</Text>
+          </View>
+          <Text className="text-[13px] mt-2 text-gray-700">
+            {!pipeline || pipeline.total === 0
+              ? '本周管线清爽'
+              : pipeline.stages.map((s) => `${s.stage} ${s.count}`).join(' · ')}
+          </Text>
+        </Pressable>
 
         {/* 趋势折线图 */}
         <View className="bg-white rounded-2xl p-4 mb-3"

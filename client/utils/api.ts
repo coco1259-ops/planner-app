@@ -150,4 +150,92 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ weekKey, dates }),
     }),
+
+  /**
+   * 服务端文件：server/src/routes/schedule.ts
+   * 接口：GET /api/v1/schedule
+   */
+  listSchedule: () => request<{ data: ScheduleItem[] }>('/api/v1/schedule'),
+
+  /**
+   * 服务端文件：server/src/routes/schedule.ts
+   * 接口：GET /api/v1/schedule/:id
+   * Path 参数：id: string
+   */
+  getSchedule: (id: string) => request<{ data: ScheduleItem }>(`/api/v1/schedule/${id}`),
+
+  /**
+   * 服务端文件：server/src/routes/schedule.ts
+   * 接口：POST /api/v1/schedule
+   * Body 参数：见 SchedulePayload
+   */
+  createSchedule: (payload: SchedulePayload) =>
+    request<{ data: ScheduleItem }>('/api/v1/schedule', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  /**
+   * 服务端文件：server/src/routes/schedule.ts
+   * 接口：PUT /api/v1/schedule/:id
+   * Path 参数：id: string, Body 见 SchedulePayload(partial)
+   */
+  updateSchedule: (id: string, payload: SchedulePayload) =>
+    request<{ data: ScheduleItem }>(`/api/v1/schedule/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
+  /**
+   * 服务端文件：server/src/routes/schedule.ts
+   * 接口：DELETE /api/v1/schedule/:id
+   * Path 参数：id: string
+   */
+  deleteSchedule: (id: string) =>
+    request<{ ok: boolean }>(`/api/v1/schedule/${id}`, { method: 'DELETE' }),
+
+  /**
+   * 服务端文件：server/src/routes/schedule-export.ts
+   * 接口：GET /api/v1/schedule/export
+   * 说明：导出全部排期为 xlsx，返回签名下载 URL
+   */
+  exportSchedule: () => request<{ downloadUrl: string; fileName: string }>('/api/v1/schedule/export'),
+
+  /**
+   * 服务端文件：server/src/routes/schedule.ts
+   * 接口：GET /api/v1/schedule/pipeline
+   * 说明：统计未来7天内到期的未完成阶段
+   */
+  schedulePipeline: () =>
+    request<{ total: number; stages: { stage: ScheduleStage; count: number }[] }>('/api/v1/schedule/pipeline'),
 };
+
+export type ScheduleStage = '大纲' | '粗稿' | '定稿' | '拍摄' | '粗剪' | '送审' | '精剪' | '发布';
+
+export interface ScheduleStageItem {
+  date?: string | null;
+  done?: boolean;
+}
+
+export type ScheduleType = '商单' | '科普选题';
+
+export interface ScheduleItem {
+  id: string;
+  project_name: string;
+  schedule_type: ScheduleType;
+  client_name: string;
+  pub_date: string | null;
+  stages: Partial<Record<ScheduleStage, ScheduleStageItem>>;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface SchedulePayload {
+  project_name: string;
+  schedule_type: ScheduleType;
+  client_name?: string;
+  pub_date?: string | null;
+  stages?: Partial<Record<ScheduleStage, ScheduleStageItem>>;
+}
+
+export const SCHEDULE_STAGES: ScheduleStage[] = ['大纲', '粗稿', '定稿', '拍摄', '粗剪', '送审', '精剪', '发布'];
