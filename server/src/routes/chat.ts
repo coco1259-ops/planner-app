@@ -5,6 +5,12 @@ import { getSupabaseClient } from '../storage/database/supabase-client';
 
 const router = Router();
 
+// 模型名可配置：
+// - 本地/沙箱：默认用扣子内置模型（走 coze 集成 base url）；
+// - 生产（Railway）：可配置 PLAN_MODEL_NAME / PLAN_EXTRACT_MODEL_NAME 覆盖为豆包接入点(ep-xxxx)等。
+const CHAT_MODEL = process.env.PLAN_MODEL_NAME || 'doubao-seed-2-0-pro-260215';
+const EXTRACT_MODEL = process.env.PLAN_EXTRACT_MODEL_NAME || 'doubao-seed-2-0-lite-260215';
+
 /**
  * 构建内置大脑的 LLM Client。
  * - 本地/沙箱：coze 运行时会自动注入 COZE_INTEGRATION_MODEL_BASE_URL 等凭据，直接 new Config() 即可；
@@ -144,7 +150,7 @@ router.post('/plan', async (req, res) => {
     // 用内置「计划管家」流式输出（不再依赖外部 agent）
     let assistantReply = '';
     const stream = client.stream(genericMsgs, {
-      model: 'doubao-seed-2-0-pro-260215',
+      model: CHAT_MODEL,
       temperature: 0.7,
     });
     for await (const chunk of stream) {
@@ -226,7 +232,7 @@ async function extractAndInsertTasks(
 
   const resp = await client.invoke(
     [{ role: 'user', content: prompt }],
-    { model: 'doubao-seed-2-0-lite-260215', temperature: 0.1 },
+    { model: EXTRACT_MODEL, temperature: 0.1 },
   );
 
   const raw = resp.content ?? '';
@@ -379,7 +385,7 @@ async function maybeCreateSchedule(client: LLMClient, userText: string): Promise
   try {
     resp = await client.invoke(
       [{ role: 'user', content: prompt }],
-      { model: 'doubao-seed-2-0-lite-260215', temperature: 0.1 },
+      { model: EXTRACT_MODEL, temperature: 0.1 },
     );
   } catch (e) {
     console.error('schedule intent invoke error:', e);
