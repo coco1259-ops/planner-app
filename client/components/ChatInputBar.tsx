@@ -8,11 +8,16 @@ interface Props {
   onAdd?: () => void;
   autoFocus?: boolean;
   placeholder?: string;
+  /** 是否支持多行自适应增高（默认单行）；仅对话浮层启用 */
+  multiline?: boolean;
 }
 
+const MAX_INPUT_HEIGHT = 110;
+
 /** 常驻 AI 对话输入条：左侧语音按钮 + 文字输入框 + 右侧(发送/手动添加) */
-export default function ChatInputBar({ onSend, onAdd, autoFocus, placeholder }: Props) {
+export default function ChatInputBar({ onSend, onAdd, autoFocus, placeholder, multiline }: Props) {
   const [text, setText] = useState('');
+  const [inputHeight, setInputHeight] = useState(22);
   // 语音识别完成后自动发送：说出计划 → 直接交给计划管家执行
   const { recording, processing, start, stop } = useVoiceInput((result) => {
     const t = (result ?? '').trim();
@@ -56,20 +61,27 @@ export default function ChatInputBar({ onSend, onAdd, autoFocus, placeholder }: 
           )}
         </Pressable>
 
-        {/* 文字输入框 */}
-        <View className="flex-1 rounded-2xl px-3.5 bg-gray-100 h-12 justify-center">
+        {/* 文字输入框：multiline 时高度自适应（上限 MAX_INPUT_HEIGHT） */}
+        <View className="flex-1 rounded-2xl px-3.5 bg-gray-100" style={{ minHeight: 48, justifyContent: 'center' }}>
           <TextInput
-            className="text-[15px] text-gray-900 py-2"
+            className="text-[15px] text-gray-900"
+            style={{ height: multiline ? Math.min(Math.max(inputHeight, 22), MAX_INPUT_HEIGHT) : undefined, minHeight: 22, maxHeight: multiline ? MAX_INPUT_HEIGHT : 22, paddingVertical: multiline ? 10 : 6, paddingHorizontal: 0, margin: 0 }}
             placeholderTextColor="#9CA3AF"
             placeholder={recording ? '正在录音，再点一次结束…' : placeholder ?? '和计划管家聊聊安排…'}
             value={text}
             autoFocus={autoFocus}
             onChangeText={setText}
-            multiline={false}
+            multiline={!!multiline}
             onSubmitEditing={handleSend}
             returnKeyType="send"
+            onContentSizeChange={(e) => {
+              if (multiline) setInputHeight(e.nativeEvent.contentSize.height);
+            }}
             onKeyPress={(e) => {
-              if (Platform.OS === 'web' && e.nativeEvent.key === 'Enter') {
+              // Web 端：回车发送（无 Shift 时），避免在多行模式下插入换行
+              const native = e.nativeEvent as any;
+              if (Platform.OS === 'web' && native.key === 'Enter' && !native.shiftKey) {
+                if (e.preventDefault) e.preventDefault();
                 handleSend();
               }
             }}
