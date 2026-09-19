@@ -1,11 +1,12 @@
 import { useCallback, useState } from 'react';
-import { View, Text, Pressable, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, Pressable, ScrollView, ActivityIndicator, Alert } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import dayjs from 'dayjs';
 import { FontAwesome6 } from '@expo/vector-icons';
 import { Screen } from '@/components/Screen';
 import { useSafeRouter } from '@/hooks/useSafeRouter';
 import { api, SCHEDULE_STAGES, ScheduleItem, ScheduleStage } from '@/utils/api';
+import { exportScheduleExcel } from '@/utils/scheduleExport';
 
 // 自动计算"当前阶段"：第一个未完成的阶段
 function currentStage(stages: ScheduleItem['stages']): ScheduleStage | null {
@@ -21,6 +22,7 @@ export default function SchedulePage() {
   const router = useSafeRouter();
   const [list, setList] = useState<ScheduleItem[] | null>(null);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
 
   const fetchList = useCallback(async () => {
     try {
@@ -39,20 +41,44 @@ export default function SchedulePage() {
     }, [fetchList])
   );
 
+  const handleExport = async () => {
+    try {
+      setExporting(true);
+      const res = await exportScheduleExcel();
+      if (!res.ok && res.fileName) {
+        Alert.alert('提示', '导出失败，请重试');
+      }
+    } catch {
+      Alert.alert('提示', '导出失败，请重试');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <Screen>
       <ScrollView className="flex-1" contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
-        {/* 标题 + 新建按钮 */}
+        {/* 标题 + 操作按钮 */}
         <View className="flex-row items-center justify-between mb-4">
           <Text className="text-xl font-bold text-gray-900">排期</Text>
-          <Pressable
-            onPress={() => router.push('/schedule-edit')}
-            className="flex-row items-center bg-indigo-500 rounded-full px-4 py-2"
-            style={{ shadowColor: '#4F46E5', shadowOpacity: 0.25, shadowOffset: { width: 0, height: 2 }, shadowRadius: 5 }}
-          >
-            <FontAwesome6 name="plus" size={13} color="#fff" />
-            <Text className="text-white font-semibold text-[13px] ml-1">新建排期</Text>
-          </Pressable>
+          <View className="flex-row items-center">
+            <Pressable
+              disabled={exporting}
+              onPress={handleExport}
+              className="flex-row items-center bg-gray-800 rounded-full px-3.5 py-2 mr-2"
+            >
+              <FontAwesome6 name="file-export" size={12} color="#fff" />
+              <Text className="text-white font-semibold text-[12px] ml-1.5">{exporting ? '导出中...' : '导出Excel并发送'}</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => router.push('/schedule-edit')}
+              className="flex-row items-center bg-indigo-500 rounded-full px-4 py-2"
+              style={{ shadowColor: '#4F46E5', shadowOpacity: 0.25, shadowOffset: { width: 0, height: 2 }, shadowRadius: 5 }}
+            >
+              <FontAwesome6 name="plus" size={13} color="#fff" />
+              <Text className="text-white font-semibold text-[13px] ml-1">新建排期</Text>
+            </Pressable>
+          </View>
         </View>
 
         {loading ? (

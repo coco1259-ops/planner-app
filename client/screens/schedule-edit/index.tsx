@@ -7,24 +7,17 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
-  Platform,
 } from 'react-native';
 import { useSafeRouter, useSafeSearchParams } from '@/hooks/useSafeRouter';
 import { Screen } from '@/components/Screen';
 import { SmartDateInput } from '@/components/SmartDateInput';
 import { FontAwesome6 } from '@expo/vector-icons';
 import { api, SCHEDULE_STAGES, ScheduleItem, SchedulePayload, ScheduleStage, ScheduleType } from '@/utils/api';
+import { shareImageFromDataUrl, saveImageFromDataUrl } from '@/utils/shareImage';
+import { renderScheduleImageCanvas } from '@/utils/scheduleImage';
 
 const TYPE_OPTIONS: ScheduleType[] = ['商单', '科普选题'];
 const TYPE_COLOR: Record<string, string> = { 商单: '#4F46E5', 科普选题: '#0EA5E9' };
-
-// 将 base64 xlsx 转为 Blob（仅 Web 端使用）
-function base64ToBlob(b64: string): Blob {
-  const binary = atob(b64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-}
 
 export default function ScheduleEditPage() {
   const router = useSafeRouter();
@@ -34,7 +27,7 @@ export default function ScheduleEditPage() {
   const [loading, setLoading] = useState(isEdit);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [exporting, setExporting] = useState(false);
+  const [generating, setGenerating] = useState(false);
 
   const [projectName, setProjectName] = useState('');
   const [scheduleType, setScheduleType] = useState<ScheduleType>('商单');
@@ -120,65 +113,50 @@ export default function ScheduleEditPage() {
     ]);
   };
 
-  const triggerDownload = useCallback((url: string, fileName: string) => {
-    // 仅 Web 端执行（PWA 主屏幕访问）；后端返回签名 URL，用 fetch+blob 触发下载
-    if (Platform.OS !== 'web') return;
-    fetch(url)
-      .then((r) => r.blob())
-      .then((blob) => {
-        const blobUrl = window.URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = blobUrl;
-        link.download = fileName;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        window.URL.revokeObjectURL(blobUrl);
-      })
-      .catch(() => {
-        window.open(url, '_blank');
-      });
-  }, []);
+  const buildStageList = useCallback(() => {
+    return SCHEDULE_STAGES.map((name) => {
+      const s = stages[name] ?? {};
+      return { name, date: s.date ?? null, done: !!s.done };
+    });
+  }, [stages]);
 
-  // 导出 Excel 并分享 / 降级下载
-  const handleExport = async () => {
+  // 生成排期图 → 系统分享面板（可发微信/保存）
+  const handleGenerateImage = async () => {
+    if (!projectName.trim()) {
+      Alert.alert('提示', '请先填写项目名称再生成排期图');
+      return;
+    }
     try {
-      setExporting(true);
-      const { downloadUrl, fileName, base64 } = await api.exportSchedule();
-      const finalUrl =
-        downloadUrl ||
-        (base64 && Platform.OS === 'web'
-          ? URL.createObjectURL(base64ToBlob(base64))
-          : '');
-      if (!finalUrl) {
-        if (Platform.OS !== 'web') {
-          Alert.alert('导出成功', `文件已生成：${fileName}\n数据已编码，请在网页端使用`);
-        } else {
-          Alert.alert('提示', '导出失败，请重试');
-        }
-        return;
-      }
-      // Web 端优先尝试系统分享面板（可发微信等）
-      if (Platform.OS === 'web') {
-        const nav: any = (globalThis as any).navigator;
-        if (typeof nav?.share === 'function') {
-          try {
-            await nav.share({ title: '内容排期表', text: '内容排期表已导出', url: finalUrl });
-            return;
-          } catch (shareErr: any) {
-            if (shareErr?.name === 'AbortError') return;
-            triggerDownload(finalUrl, fileName);
-          }
-        } else {
-          triggerDownload(finalUrl, fileName);
-        }
-      } else {
-        Alert.alert('导出成功', `文件已生成：${fileName}\n请在网页端打开，或使用分享下载：\n${finalUrl}`);
-      }
+      setGenerating(true);
+      const dataUrl = renderScheduleImageCanvas({
+        projectName: projectName.trim(),
+        scheduleType,
+        clientName: clientName.trim(),
+        pubDate,
+        stages: buildStageList(),
+      });
+      const fileName = `排期图_${projectName.trim()}_${scheduleType}.png`;
+      await shareImageFromDataUrl(dataUrl, fileName);
     } catch {
-      Alert.alert('提示', '导出失败，请重试');
+      Alert.alert('提示', '生成排期图失败，请重试');
     } finally {
-      setExporting(false);
+      setGenerating(false);
+    }
+  };
+
+  const handleSaveToGallery = async () => {
+    try {
+      const dataUrl = renderScheduleImageCanvas({
+        projectName: projectName.trim(),
+        scheduleType,
+        clientName: clientName.trim(),
+        pubDate,
+        stages: buildStageList(),
+      });
+      await saveImageFromDataUrl(dataUrl, `排期图_${projectName.trim()}_${scheduleType}.png`);
+      Alert.alert('成功', '排期图已保存');
+    } catch {
+      Alert.alert('提示', '保存失败，请重试');
     }
   };
 
@@ -295,7 +273,31 @@ export default function ScheduleEditPage() {
           );
         })}
 
-        {/* 操作按钮 */}
+        {/* 生成排期图 */}
+        {isEdit && (
+          <>
+            <Pressable
+              disabled={generating}
+              onPress={handleGenerateImage}
+              className="flex-row items-center justify-center rounded-xl py-3.5 mb-3"
+              style={{ backgroundColor: '#4F46E5', shadowColor: '#4F46E5', shadowOpacity: 0.25, shadowOffset: { width: 0, height: 2 }, shadowRadius: 6 }}
+            >
+              <FontAwesome6 name="image" size={15} color="#fff" style={{ marginRight: 6 }} />
+              <Text className="text-white font-bold text-[15px]">{generating ? '生成中...' : '生成排期图'}</Text>
+            </Pressable>
+
+            <Pressable
+              onPress={handleSaveToGallery}
+              className="flex-row items-center justify-center rounded-xl py-3 mb-3 border border-indigo-200"
+              style={{ backgroundColor: '#EEF2FF' }}
+            >
+              <FontAwesome6 name="download" size={15} color="#4F46E5" style={{ marginRight: 6 }} />
+              <Text className="text-indigo-600 font-semibold text-[14px]">保存到相册</Text>
+            </Pressable>
+          </>
+        )}
+
+        {/* 删除 */}
         {isEdit && (
           <Pressable
             disabled={deleting}
@@ -314,14 +316,6 @@ export default function ScheduleEditPage() {
           style={{ shadowColor: '#4F46E5', shadowOpacity: 0.25, shadowOffset: { width: 0, height: 2 }, shadowRadius: 6 }}
         >
           <Text className="text-white font-bold text-[15px]">{saving ? '保存中...' : isEdit ? '保存修改' : '保存'}</Text>
-        </Pressable>
-
-        <Pressable
-          disabled={exporting}
-          onPress={handleExport}
-          className="bg-gray-800 rounded-xl py-3.5 items-center"
-        >
-          <Text className="text-white font-bold text-[15px]">{exporting ? '导出中...' : '导出Excel并发送'}</Text>
         </Pressable>
       </ScrollView>
     </Screen>
