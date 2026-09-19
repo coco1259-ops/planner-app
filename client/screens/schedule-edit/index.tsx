@@ -13,7 +13,7 @@ import { Screen } from '@/components/Screen';
 import { SmartDateInput } from '@/components/SmartDateInput';
 import { FontAwesome6 } from '@expo/vector-icons';
 import { api, SCHEDULE_STAGES, ScheduleItem, SchedulePayload, ScheduleStage, ScheduleType } from '@/utils/api';
-import { shareImageFromDataUrl, saveImageFromDataUrl } from '@/utils/shareImage';
+import { shareImageFromDataUrl } from '@/utils/shareImage';
 import { renderScheduleImageCanvas } from '@/utils/scheduleImage';
 
 const TYPE_OPTIONS: ScheduleType[] = ['商单', '科普选题'];
@@ -144,22 +144,6 @@ export default function ScheduleEditPage() {
     }
   };
 
-  const handleSaveToGallery = async () => {
-    try {
-      const dataUrl = renderScheduleImageCanvas({
-        projectName: projectName.trim(),
-        scheduleType,
-        clientName: clientName.trim(),
-        pubDate,
-        stages: buildStageList(),
-      });
-      await saveImageFromDataUrl(dataUrl, `排期图_${projectName.trim()}_${scheduleType}.png`);
-      Alert.alert('成功', '排期图已保存');
-    } catch {
-      Alert.alert('提示', '保存失败，请重试');
-    }
-  };
-
   if (loading) {
     return (
       <Screen>
@@ -286,15 +270,7 @@ export default function ScheduleEditPage() {
               <Text className="text-white font-bold text-[15px]">{generating ? '生成中...' : '生成排期图'}</Text>
             </Pressable>
 
-            <Pressable
-              onPress={handleSaveToGallery}
-              className="flex-row items-center justify-center rounded-xl py-3 mb-3 border border-indigo-200"
-              style={{ backgroundColor: '#EEF2FF' }}
-            >
-              <FontAwesome6 name="download" size={15} color="#4F46E5" style={{ marginRight: 6 }} />
-              <Text className="text-indigo-600 font-semibold text-[14px]">保存到相册</Text>
-            </Pressable>
-          </>
+            </>
         )}
 
         {/* 删除 */}

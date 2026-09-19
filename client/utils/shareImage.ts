@@ -1,10 +1,9 @@
 /**
- * 内容分享 / 保存相册 辅助（Web 端 PWA 为主，兼容原生端降级）。
+ * 内容分享辅助（Web 端 PWA 为主，兼容原生端降级）。
  *
  * 运行环境为 iPhone 主屏幕访问的 PWA（server/public 静态站点），故以 Web API 为主：
- * - 系统分享面板：navigator.share({ files })（iOS Safari/PWA 支持，可发微信等）
- * - 保存到相册：Web 端不支持直接写入相册，降级为 <a download> 下载（保存到"文件"/相册由系统引导）；
- *   原生端（未来）可用 expo-media-library 写入相册。
+ * - 系统分享面板：navigator.share({ files })（iOS Safari/PWA 支持，可发微信、保存图像等）
+ * - 分享失败降级为 <a download> 下载
  */
 import { Platform } from 'react-native';
 
@@ -60,17 +59,6 @@ export async function shareImageFromDataUrl(dataUrl: string, fileName = `排期�
   } catch {
     triggerDownloadSafely(dataUrl, fileName);
   }
-}
-
-/** 保存到相册入口：Web 端降级为下载（保存到"文件"），原生端占位 */
-export async function saveImageFromDataUrl(dataUrl: string, fileName = `排期图_${Date.now()}.png`): Promise<'saved' | 'downloaded'> {
-  if (Platform.OS !== 'web') {
-    // 原生端：可在此扩展 expo-media-library 写入相册
-    triggerDownloadSafely(dataUrl, fileName);
-    return 'downloaded';
-  }
-  triggerDownloadSafely(dataUrl, fileName);
-  return 'downloaded';
 }
 
 // 非 Web 下无法用 DOM，直接忽略（真实流程只走 Web）

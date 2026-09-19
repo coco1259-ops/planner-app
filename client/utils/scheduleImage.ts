@@ -2,8 +2,9 @@
  * 排期图生成器（Web 端）。
  *
  * 运行环境是 Web/PWA（iPhone 主屏幕访问 server/public 静态站点），
- * 因此用 HTML canvas 将排期信息绘制成一张竖版 PNG，供系统分享面板 / 下载 / 保存相册使用。
+ * 因此用 HTML canvas 将排期信息绘制成一张竖版 PNG，供系统分享面板 / 下载使用。
  *
+ * 设计定位：独立渲染的客户交付图（非页面截图），风格专业、信息密度高、竖版 4:5。
  * 说明：仅 Web 端调用；canvas 是浏览器 API，在原生端不执行（由调用方用 Platform 判断）。
  */
 import { todayG8 } from './gmt8';
@@ -27,6 +28,15 @@ export const buildGeneratedLabel = (): string => {
   return `生成于 ${Number(m[1])}年${Number(m[2])}月${Number(m[3])}日`;
 };
 
+/** 返回两个 GMT+8 日期相差的天数（date - today，可负）。today 为今天（GMT+8）。 */
+function diffDaysFromToday(date: string): number {
+  const today = todayG8() || '';
+  if (!date || !today) return 0;
+  const d1 = new Date(`${date}T00:00:00`);
+  const d2 = new Date(`${today}T00:00:00`);
+  return Math.round((d1.getTime() - d2.getTime()) / 86400000);
+}
+
 interface ScheduleImageInput {
   projectName: string;
   scheduleType: string;
@@ -35,19 +45,24 @@ interface ScheduleImageInput {
   stages: { name: string; date?: string | null; done?: boolean }[];
 }
 
-/** 绘制并返回 PNG 的 dataURL（canvas 800x1422 约 9:16 竖版） */
+/**
+ * 绘制并返回 PNG 的 dataURL。
+ * 画布 1080 x 1350（4:5 竖版），适合微信点开一屏看完。
+ */
 export function renderScheduleImageCanvas(input: ScheduleImageInput): string {
-  // 竖版 9:16，宽 720 x 高 1280（保持清晰且文件体积适中）
-  const W = 720;
-  const H = 1280;
+  const W = 1080;
+  const H = 1350;
+  const dpr = 2; // 2x 像素保证清晰
   const canvas = document.createElement('canvas');
-  canvas.width = W;
-  canvas.height = H;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('no canvas ctx');
+  ctx.scale(dpr, dpr);
 
   // ---- 通用工具 ----
-  const font = (weight: number, size: number) => `font-weight:${weight}; font-size:${size}px; font-family:-apple-system,'PingFang SC','Helvetica Neue',sans-serif;`;
+  const font = (weight: number, size: number) =>
+    `font-weight:${weight}; font-size:${size}px; font-family:-apple-system,'PingFang SC','Helvetica Neue',sans-serif;`;
   const text = (s: string, x: number, y: number, color: string, size: number, weight = 500, align: CanvasTextAlign = 'left') => {
     ctx.font = font(weight, size);
     ctx.fillStyle = color;
@@ -69,129 +84,218 @@ export function renderScheduleImageCanvas(input: ScheduleImageInput): string {
     return ctx.measureText(s).width;
   };
 
-  // ---- 配色（与 App 风格一致：商单靛蓝 / 科普天蓝）----
-  const typeColor = input.scheduleType === '商单' ? '#4F46E5' : '#0EA5E9';
-  const bgTop = '#FFFFFF';
-  const bgBottom = '#F6F7FB';
+  // ---- 配色（紫色系主色，纯白底，圆角卡片浅灰描边）----
+  const purple = '#7C3AED'; // 主紫
+  const purpleBorder = '#C4B5FD';
+  const purpleSoft = '#F5F3FF'; // 浅紫底（当前阶段高亮）
   const textMain = '#111827';
   const textSub = '#6B7280';
+  const textLight = '#9CA3AF';
   const lineGray = '#E5E7EB';
-  const doneGreen = '#22C55E';
-  const currentColor = '#4F46E5';
+  const cardBorder = '#E8E8EE';
   const white = '#FFFFFF';
+  const doneGreen = '#22C55E';
+  const doneGreenText = '#16A34A';
 
-  // 背景（顶部白 → 底部浅灰 纵向渐变）
-  const grad = ctx.createLinearGradient(0, 0, 0, H);
-  grad.addColorStop(0, bgTop);
-  grad.addColorStop(1, bgBottom);
-  ctx.fillStyle = grad;
+  const PX = 44; // 页边距
+  const W_INNER = W - PX * 2; // 内容宽
+
+  // ---- 底色：纯白 ----
+  ctx.fillStyle = white;
   ctx.fillRect(0, 0, W, H);
 
-  // ---- 顶部信息区 ----
-  // 类型徽标
-  ctx.fillStyle = `${typeColor}1F`;
-  roundRect(38, 46, measureText(input.scheduleType, 20) + 36, 40, 20);
-  ctx.fill();
-  text(input.scheduleType, 56, 56, typeColor, 20, 600);
+  // ============= 区块1：头部品牌条 =============
+  let y = 40;
+  // 左侧署名
+  text('起舞龙清影', PX, y, textMain, 26, 700);
+  // 右侧小字
+  text('项目排期表 PROJECT SCHEDULE', W - PX, y + 6, textLight, 18, 500, 'right');
+  y += 54;
 
-  // 项目名（大字）
-  text(input.projectName, 38, 110, textMain, 34, 800);
-
-  // 客户 + 发布日期
-  const clientPart = input.clientName ? `客户：${input.clientName}` : '';
-  const pubPart = formatDateCn(input.pubDate) ? `发布日期：${formatDateCn(input.pubDate)}` : '发布日期：待定';
-  const metaY = 168;
-  if (clientPart) {
-    text(clientPart, 38, metaY, textSub, 20, 500);
-    text(pubPart, 38 + measureText(clientPart, 20) + 36, metaY, textSub, 20, 500);
-  } else {
-    text(pubPart, 38, metaY, textSub, 20, 500);
-  }
-
-  // 分隔线
-  ctx.strokeStyle = lineGray;
+  // ============= 区块2：项目信息卡 =============
+  const cardY = y;
+  const cardH = 158;
+  ctx.fillStyle = white;
+  ctx.strokeStyle = cardBorder;
   ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(38, 220);
-  ctx.lineTo(W - 38, 220);
+  roundRect(PX, cardY, W_INNER, cardH, 18);
+  ctx.fill();
   ctx.stroke();
 
-  // ---- 中部：8 阶段竖向时间线 ----
-  const lineX = 58; // 时间线圆心 x
-  const topY = 260;
-  const step = 118; // 每个阶段纵向间距（H-上方-底部留白 ≈ (1280-260-150)/4）
-  const textColorDone = '#16A34A';
-  const textColorCurrent = '#4F46E5';
-  const textColorTodo = '#374151';
+  // 项目名（大字）
+  const projectName = input.projectName || '未命名项目';
+  text(projectName, PX + 28, cardY + 24, textMain, 34, 800);
+  // 类型小徽标（右上）
+  const typeText = input.scheduleType;
+  const typeW = measureText(typeText, 18) + 28;
+  ctx.fillStyle = purpleSoft;
+  roundRect(W - PX - typeW - 28, cardY + 26, typeW, 32, 16);
+  ctx.fill();
+  text(typeText, W - PX - 28 - typeW / 2, cardY + 33, purple, 18, 600, 'center');
 
-  input.stages.forEach((st, idx) => {
-    const y = topY + idx * step;
+  // 一行三列：品牌方 | 发布日期 | 当前进度
+  const colW = W_INNER / 3;
+  const metaTop = cardY + 88;
+  const labelColor = textLight;
+  const rowLabel = (label: string, x: number) => text(label, x, metaTop - 2, labelColor, 16, 500);
+  const rowValue = (value: string, x: number, color = textMain) => text(value, x, metaTop + 26, color, 20, 600);
+
+  // 品牌方
+  rowLabel('品牌方', PX + 28);
+  rowValue(input.clientName || '—', PX + 28);
+
+  // 发布日期
+  const pubX = PX + 28 + colW;
+  rowLabel('发布日期', pubX);
+  rowValue(formatDateCn(input.pubDate) ? `${formatDateCn(input.pubDate)}` : '待定', pubX);
+
+  // 当前进度（如 "大纲 · 第1/8阶段"）
+  const progX = PX + 28 + colW * 2;
+  rowLabel('当前进度', progX);
+  const firstNotDone = input.stages.findIndex((s) => !s.done);
+  const curIdx = firstNotDone === -1 ? input.stages.length : firstNotDone;
+  const curStageName = curIdx > 0 && curIdx <= input.stages.length ? input.stages[curIdx - 1].name : '';
+  rowValue(`${curStageName} · 第${curIdx}/${input.stages.length}阶段`, progX);
+
+  y = cardY + cardH + 26;
+
+  // ============= 区块3：8阶段紧凑时间线（核心，行高约90px） =============
+  const ROW_H = 92;
+  const topY = y;
+  const stages = input.stages;
+  const lineX = 62; // 时间线竖轴 x（节点圆心）
+  const N = stages.length;
+
+  stages.forEach((st, idx) => {
+    const rowY = topY + idx * ROW_H;
     const isDone = !!st.done;
-    const isFirstNotDone = !isDone && (idx === 0 || !!input.stages[idx - 1]?.done);
-    const dateLabel = formatDateCn(st.date) ?? '待定';
+    const isCurrent = !isDone && (idx === 0 || !!stages[idx - 1]?.done);
 
-    // 连线（上下）
-    if (idx < input.stages.length - 1) {
+    // 当前阶段整行浅紫底高亮
+    if (isCurrent) {
+      ctx.fillStyle = purpleSoft;
+      roundRect(PX, rowY - 4, W_INNER, ROW_H - 6, 16);
+      ctx.fill();
+    }
+
+    // 连轴（竖直线）：从上一行节点底到本行节点中心
+    ctx.strokeStyle = isDone || isCurrent ? '#C4B5FD' : lineGray;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(lineX, rowY - 4);
+    ctx.lineTo(lineX, rowY + 36);
+    ctx.stroke();
+    if (idx === 0) {
+      // 顶段短竖线
       ctx.strokeStyle = lineGray;
-      ctx.lineWidth = 2.5;
       ctx.beginPath();
-      ctx.moveTo(lineX, y + 30);
-      ctx.lineTo(lineX, y + step);
+      ctx.moveTo(lineX, topY - 12);
+      ctx.lineTo(lineX, topY + 34);
       ctx.stroke();
     }
 
     // 节点圆
-    ctx.fillStyle = isDone ? doneGreen : isFirstNotDone ? currentColor : '#D1D5DB';
-    ctx.beginPath();
-    ctx.arc(lineX, y + 18, 15, 0, Math.PI * 2);
-    ctx.fill();
+    const cy = rowY + 36;
     if (isDone) {
-      // 绿色勾
-      text('✓', lineX, y + 9, white, 18, 800);
-    } else if (isFirstNotDone) {
-      text(`${idx + 1}`, lineX, y + 10, white, 16, 700);
+      // 实心绿圆 + 白勾
+      ctx.fillStyle = doneGreen;
+      ctx.beginPath();
+      ctx.arc(lineX, cy, 16, 0, Math.PI * 2);
+      ctx.fill();
+      text('✓', lineX, cy - 11, white, 20, 800, 'center');
+    } else if (isCurrent) {
+      // 放大紫圆 + 白字序号
+      ctx.fillStyle = purple;
+      ctx.beginPath();
+      ctx.arc(lineX, cy, 19, 0, Math.PI * 2);
+      ctx.fill();
+      text(`${idx + 1}`, lineX, cy - 11, white, 20, 800, 'center');
+    } else {
+      // 浅灰空心圆
+      ctx.strokeStyle = '#C4CBD2';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(lineX, cy, 15, 0, Math.PI * 2);
+      ctx.stroke();
     }
 
-    // 文本：阶段名（左加粗）+ 状态徽标 + 日期（右侧）
-    const nameColor = isDone ? textColorDone : isFirstNotDone ? textColorCurrent : textColorTodo;
-    text(st.name, lineX + 32, y + 4, nameColor, 22, 700);
+    // 阶段名（加粗，左）
+    const nameX = lineX + 34;
+    const nameColor = isDone ? doneGreenText : isCurrent ? purple : textMain;
+    text(st.name, nameX, rowY + 22, nameColor, 22, 700);
 
-    // 状态徽标
+    // 状态徽章
     let statusText: string;
     let statusBg: string;
     let statusColor: string;
+    let statusBorder = 'transparent';
     if (isDone) {
       statusText = '已完成';
-      statusBg = '#22C55E1F';
-      statusColor = '#16A34A';
-    } else if (isFirstNotDone) {
+      statusBg = '#22C55E1A';
+      statusColor = doneGreenText;
+    } else if (isCurrent) {
       statusText = '进行中';
-      statusBg = '#4F46E51F';
-      statusColor = '#4F46E5';
+      statusBg = '#7C3AED22';
+      statusColor = purple;
+      statusBorder = purpleBorder;
     } else {
       statusText = '未开始';
-      statusBg = '#E5E7EB';
-      statusColor = '#9CA3AF';
+      statusBg = '#F1F2F4';
+      statusColor = textLight;
     }
-    const statusW = measureText(statusText, 16) + 28;
-    const statusX = lineX + 32 + measureText(st.name, 22) + 18;
+    const statusW = measureText(statusText, 16) + 26;
+    const statusX = nameX + measureText(st.name, 22) + 16;
     ctx.fillStyle = statusBg;
-    roundRect(statusX, y, statusW, 30, 15);
+    roundRect(statusX, rowY + 22, statusW, 30, 15);
     ctx.fill();
-    text(statusText, statusX + 14, y + 7, statusColor, 16, 600);
+    if (statusBorder !== 'transparent') {
+      ctx.strokeStyle = statusBorder;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+    text(statusText, statusX + 13, rowY + 29, statusColor, 16, 600);
 
-    // 日期（右侧，右对齐）
-    text(dateLabel, W - 38, y + 4, isFirstNotDone ? currentColor : textSub, 20, 500, 'right');
+    // 日期（右对齐）
+    const dateLabel = formatDateCn(st.date) ?? '待定';
+    text(dateLabel, W - PX - 28, rowY + 24, isCurrent ? purple : textSub, 20, 500, 'right');
   });
 
-  // ---- 底部：生成日期（信息新鲜度）----
-  ctx.strokeStyle = lineGray;
+  const timelineBottom = topY + N * ROW_H;
+
+  // ---- 日期相同的相邻阶段行：紧凑排列（通过更小行高已在上方体现；此处省略额外合并） ----
+
+  // ============= 区块4：进度摘要条 =============
+  const doneCount = stages.filter((s) => s.done).length;
+  const firstTodoIdx = stages.findIndex((s) => !s.done);
+  const doingCount = firstTodoIdx === -1 ? 0 : 1; // 第一个未完成阶段 = 进行中
+  const todoCount = stages.length - doneCount - doingCount;
+  // 距发布天数：发布日期 - 今天
+  let daysToPub = '';
+  if (input.pubDate && formatDateCn(input.pubDate)) {
+    const d = diffDaysFromToday(input.pubDate);
+    if (d >= 0) daysToPub = `${d} 天`;
+    else daysToPub = '已发布';
+  } else {
+    daysToPub = '待定';
+  }
+
+  const sumY = timelineBottom + 28;
+  ctx.fillStyle = '#FAFAFC';
+  roundRect(PX, sumY, W_INNER, 66, 16);
+  ctx.fill();
+  const sumText = `已完成 ${doneCount} · 进行中 ${doingCount} · 未开始 ${todoCount} · 距发布 ${daysToPub}`;
+  text(sumText, PX + 28, sumY + 23, textSub, 20, 600);
+
+  // ============= 区块5：底部 =============
+  const footY = H - 56;
+  ctx.strokeStyle = cardBorder;
   ctx.lineWidth = 1.5;
   ctx.beginPath();
-  ctx.moveTo(38, 1220);
-  ctx.lineTo(W - 38, 1220);
+  ctx.moveTo(PX, footY - 18);
+  ctx.lineTo(W - PX, footY - 18);
   ctx.stroke();
-  text(buildGeneratedLabel(), 38, 1240, '#9CA3AF', 18, 500);
+  text(buildGeneratedLabel(), PX, footY, '#111827', 18, 600);
+  text('项目进度如有调整，将同步更新', W - PX, footY, textLight, 18, 400, 'right');
 
   return canvas.toDataURL('image/png');
 }
