@@ -16,10 +16,10 @@ import { useSafeRouter, useSafeSearchParams } from '@/hooks/useSafeRouter';
 import { api, TaskType, TaskStatus, TYPE_META, TYPE_ORDER } from '@/utils/api';
 import { todayG8, weekMondayG8, nextMondayG8, periodOfWeekG8 } from '@/utils/gmt8';
 
-// 兼容单个时间（09:00）与时间段范围（4:00-7:00）
 // eslint-disable-next-line regexp/no-unused-capturing-group
-const TIME_PATTERN = /^\d{1,2}:\d{2}(?:-\d{1,2}:\d{2})?$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+// 时间段快捷选项
+const TIME_QUICK_CHIPS = ['随时', '碎片', '其他时间'];
 const TODAY = todayG8;
 // 计算本周周一（GMT+8）的日期
 export const WEEK_MONDAY = weekMondayG8;
@@ -105,10 +105,6 @@ export default function TaskDetailPage() {
       return;
     }
     const finalSlot = timeSlot.trim() ? timeSlot.trim() : '09:00';
-    if (!TIME_PATTERN.test(finalSlot)) {
-      Alert.alert('提示', '时间段格式应为 09:00 或 4:00-7:00');
-      return;
-    }
     setSaving(true);
     try {
       // 目标：plan_date 与 week_key 均取归属周周一
@@ -250,14 +246,31 @@ export default function TaskDetailPage() {
           </View>
         </View>
 
-        {/* 时间段 */}
+        {/* 时间段：快捷 chips + 标准选择 + 自由文字 */}
         <Text className="text-[13px] font-medium text-gray-500 mb-1.5 mt-4">时间段</Text>
+        <View className="flex-row flex-wrap gap-2">
+          {TIME_QUICK_CHIPS.map((c) => {
+            const active = timeSlot === c;
+            return (
+              <Pressable
+                key={c}
+                onPress={() => setTimeSlot(active ? '' : c)}
+                className="px-3.5 py-2 rounded-full border"
+                style={{ backgroundColor: active ? '#4F46E5' : '#EEF2FF', borderColor: active ? '#4F46E5' : '#C7D2FE' }}
+              >
+                <Text className="text-[13px] font-semibold" style={{ color: active ? '#fff' : '#4F46E5' }}>
+                  {c}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
         <TextInput
           value={timeSlot}
           onChangeText={setTimeSlot}
-          placeholder="如 09:00 或 4:00-7:00"
+          placeholder="自由填写，如 4:00-7:00 / 上午 / 娃午睡时…"
           selectionColorClassName="accent-indigo-500"
-          className="bg-gray-100 rounded-2xl px-4 py-3.5 text-[16px] text-gray-900"
+          className="bg-gray-100 rounded-2xl px-4 py-3.5 text-[16px] text-gray-900 mt-2"
         />
 
         {/* 类型：目标模式固定，普通模式可选择 */}

@@ -73,7 +73,12 @@ export default function HomePage() {
     if (date !== todayStr()) return null;
     const now = nowG8Time(); // HH:mm（GMT+8 墙钟）
     let cur: Task | null = null;
-    for (const t of tasks) if (t.time_slot <= now) cur = t;
+    for (const t of tasks) {
+      // 仅标准时段（HH:MM 或 HH:MM-HH:MM）参与"当前进行中"判断，自由文本（随时/碎片等）不计入
+      const isStdSlot = /^\d{1,2}:\d{2}(?:-\d{1,2}:\d{2})?$/.test(t.time_slot.trim());
+      const slotStart = isStdSlot ? t.time_slot.trim().split('-')[0] : null;
+      if (slotStart && slotStart <= now) cur = t;
+    }
     return cur?.id ?? null;
   }, [tasks, date]);
 

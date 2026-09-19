@@ -89,9 +89,10 @@ const SYSTEM_PROMPT = `# 角色
 # 写表规则一：任务 → tasks 表
 排程确认后写入 tasks 表：
 - 日期（plan_date，"明天"换算成具体日期 YYYY-MM-DD）
-- 时间段（time_slot，格式 HH:MM）、事项（title）、备注（remark）
-- 类型（task_type，只能选：deep=深度/light=轻度/personal=个人/study=学习/goal=目标）
+- 时间段（time_slot，标准时段格式 09:00 或 4:00-7:00，也可写"随时"/"碎片"/"上午"等自由文本）、事项（title）、备注（remark）
+- 类型（task_type，只能选：deep=深度/light=轻度/personal=个人/study=学习/goal=目标/life=生活）
 - 状态默认"未做"（todo）
+- 时间段的写法规则：碎片或不定时的任务，时间段写"随时"或"碎片"；深度任务写具体时段（如 4:00-7:00）
 写完回复："已写入 N 条任务到任务表"
 
 # 写表规则二：排期 → schedule 表
@@ -109,7 +110,7 @@ const SYSTEM_PROMPT = `# 角色
 - 明天 = 注入日期 +1 天；后天 = +2 天；一周从周一开始；"下周"指当前周(周一到周日)之后的下一周。
 - 任何写库的日期字段必须为 "YYYY-MM-DD" 具体日期字符串，禁止写"明天""下周"等相对词。`;
 
-const TASK_TYPES = ['deep', 'light', 'personal', 'study', 'goal'] as const;
+const TASK_TYPES = ['deep', 'light', 'personal', 'study', 'goal', 'life'] as const;
 type TaskType = (typeof TASK_TYPES)[number];
 
 function looksLikePlanRequest(text: string): boolean {
@@ -119,13 +120,23 @@ function looksLikePlanRequest(text: string): boolean {
 }
 
 function cleanTimeSlot(slot: string): string {
-  const m = /(\d{1,2}):(\d{2})/.exec(slot || '');
-  if (m) {
-    const h = Math.min(23, Math.max(0, parseInt(m[1], 10)));
-    const mm = m[2] ? Math.min(59, Math.max(0, parseInt(m[2], 10))) : 0;
+  const s = (slot || '').trim();
+  // 完整标准时段：HH:MM 或 HH:MM-HH:MM，直接保留
+  if (/^\d{1,2}:\d{2}(-\d{1,2}:\d{2})?$/.test(s)) {
+    return s.replace(/\b(\d{1,2}):(\d{2})\b/g, (_, h, mm) => {
+      const hh = String(Math.min(23, Math.max(0, parseInt(h, 10)))).padStart(2, '0');
+      return `${hh}:${mm}`;
+    });
+  }
+  // 纯时间点（如 "9点"、"上午9点"）才归一化成 HH:MM
+  const m = /(\d{1,2}):(\d{2})/.exec(s);
+  if (s && /^\d{1,2}:\d{2}$/.test(s)) {
+    const h = Math.min(23, Math.max(0, parseInt(m?.[1] ?? '0', 10)));
+    const mm = m?.[2] ? Math.min(59, Math.max(0, parseInt(m[2], 10))) : 0;
     return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
   }
-  return '09:00';
+  // 其余为自由文本（随时/碎片/上午/娃午睡时等），原样保留
+  return s || '09:00';
 }
 
 function cleanDate(d: string): string {
@@ -248,9 +259,9 @@ async function extractAndInsertTasks(
 
 规则：
 - plan_date：默认为 ${todayStr}（这是今天的真实日期，由系统注入，必为 GMT+8 日期）；若提到"明天"则用 ${addDaysG8(1)}；"后天"用 ${addDaysG8(2)}。计算时只能基于这段话里给出的今天日期 ${todayStr} 加减，禁止另行推测。
-- time_slot：根据时间描述推断成 HH:MM（如"上午9点"→09:00，"下午两点"→14:00）；无法判断则用 09:00。
+- time_slot：根据时间描述推断时间段。标准时段用 HH:MM 或 HH:MM-HH:MM（如"上午9点"→09:00，"下午两点"→14:00，"4点到7点"→4:00-7:00）；碎片或不定时的任务写"随时"或"碎片"；无法判断的可用"上午"/"下午"/"随时"等自由文本。
 - estimated_duration：根据指令推断预计时长，用中文描述（如"30分钟""1小时""1小时30分钟"）；无法判断则用空字符串。
-- task_type：深度专注工作/写脚本/剪辑=deep；零散小事/回评论/审核AI产出/浏览素材=light；个人事务/陪娃外私事=personal；学习/读书/背单词/上课=study；目标=goal。
+- task_type：深度专注工作/写脚本/剪辑=deep；零散小事/回评论/审核AI产出/浏览素材=light；个人事务/陪娃外私事=personal；学习/读书/背单词/上课=study；目标=goal；生活起居/陪娃/家务/吃饭睡觉=life。
 - remark：可为空字符串。
 - 把原文中的各项待办逐条列出。如果用户只是在闲聊、询问建议，而没有明确要排的待办事项，则返回 []。
 

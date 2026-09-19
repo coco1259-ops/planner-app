@@ -21,13 +21,14 @@ export const TASK_TYPES = [
   'chores',
   'personal',
   'goal',
+  'life',
 ] as const;
 export type TaskType = (typeof TASK_TYPES)[number];
 export const TASK_STATUSES = ['todo', 'done', 'abandoned'] as const;
 
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
-// 兼容单个时间（09:00）与时间段范围（4:00-7:00）
-const timeSlotPattern = /^\d{1,2}:\d{2}(-\d{1,2}:\d{2})?$/;
+// 时间段为自由文本：支持标准时段（09:00 / 4:00-7:00）与描述性文本（随时/碎片/娃午睡时/上午）
+const timeSlotPattern = /^.{1,50}$/;
 
 const createSchema = z.object({
   title: z.string().trim().min(1).max(200),
@@ -35,7 +36,7 @@ const createSchema = z.object({
   task_type: z.enum(TASK_TYPES).default('light'),
   plan_date: z.string().regex(datePattern, 'plan_date must be YYYY-MM-DD'),
   week_key: z.string().regex(datePattern, 'week_key must be YYYY-MM-DD').optional().nullable(),
-  time_slot: z.string().regex(timeSlotPattern, 'time_slot must be HH:MM or HH:MM-HH:MM').default('09:00'),
+  time_slot: z.string().regex(timeSlotPattern, 'time_slot 为自由文本').default('09:00'),
   estimated_duration: z.string().trim().max(40).nullish(),
 });
 
@@ -45,7 +46,7 @@ const updateSchema = z.object({
   task_type: z.enum(TASK_TYPES).optional(),
   plan_date: z.string().regex(datePattern, 'plan_date must be YYYY-MM-DD').optional(),
   week_key: z.string().regex(datePattern, 'week_key must be YYYY-MM-DD').nullable().optional(),
-  time_slot: z.string().regex(timeSlotPattern, 'time_slot must be HH:MM or HH:MM-HH:MM').optional(),
+  time_slot: z.string().regex(timeSlotPattern, 'time_slot 为自由文本').optional(),
   estimated_duration: z.string().trim().max(40).nullable().optional(),
   status: z.enum(TASK_STATUSES).optional(),
 });

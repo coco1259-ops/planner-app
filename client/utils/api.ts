@@ -13,7 +13,8 @@ export type TaskType =
   | 'deep'
   | 'light'
   | 'family'
-  | 'goal';
+  | 'goal'
+  | 'life';
 export type TaskStatus = 'todo' | 'done' | 'abandoned';
 
 export interface Task {
@@ -43,6 +44,7 @@ export const TYPE_META: Record<TaskType, { name: string; color: string }> = {
   light: { name: '轻度', color: '#22C55E' },
   personal: { name: '个人', color: '#A855F7' },
   study: { name: '学习', color: '#14B8A6' },
+  life: { name: '生活', color: '#F59E0B' },
   // 旧类型归一映射（保持历史数据回显一致）
   work: { name: '深度', color: '#EF4444' },
   childcare: { name: '轻度', color: '#22C55E' },
@@ -52,8 +54,8 @@ export const TYPE_META: Record<TaskType, { name: string; color: string }> = {
   goal: { name: '目标', color: '#F59E0B' },
 };
 
-// 新建/编辑时的可选类型：深度 / 轻度 / 个人 / 学习
-export const TYPE_ORDER: TaskType[] = ['deep', 'light', 'personal', 'study'];
+// 新建/编辑时的可选类型：深度 / 轻度 / 个人 / 学习 / 生活
+export const TYPE_ORDER: TaskType[] = ['deep', 'light', 'personal', 'study', 'life'];
 
 export const STATUS_META: Record<TaskStatus, { name: string; color: string }> = {
   todo: { name: '未做', color: '#F97316' },
