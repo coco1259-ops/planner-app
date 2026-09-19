@@ -6,6 +6,7 @@ import { FontAwesome6 } from '@expo/vector-icons';
 import { Screen } from '@/components/Screen';
 import DatePickerSheet from '@/components/DatePickerSheet';
 import { api, Task, TYPE_META } from '@/utils/api';
+import { todayG8, diffDaysFromToday, weekDayCnG8 } from '@/utils/gmt8';
 
 type Row = { type: 'header'; date: string } | { type: 'item'; task: Task };
 
@@ -46,13 +47,12 @@ export default function IncompletePage() {
   }, [tasks]);
 
   const dayLabel = (d: string) => {
-    const today = dayjs().format('YYYY-MM-DD');
-    const diff = dayjs(d).diff(dayjs(), 'day');
+    const today = todayG8();
+    const diff = diffDaysFromToday(d);
     if (d === today) return '今天';
     if (diff === -1) return '昨天';
     if (diff === 1) return '明天';
-    const wd = ['日', '一', '二', '三', '四', '五', '六'][dayjs(d).day()];
-    return `${dayjs(d).format('M月D日')} · 周${wd}`;
+    return `${dayjs(d).format('M月D日')} · 周${weekDayCnG8(d)}`;
   };
 
   const toggleSelect = (id: string) => {
@@ -174,7 +174,7 @@ export default function IncompletePage() {
         {/* 改期弹层 */}
         <DatePickerSheet
           visible={dateSheet}
-          current={dayjs().format('YYYY-MM-DD')}
+          current={todayG8()}
           onClose={() => setDateSheet(false)}
           onSelect={batchReschedule}
         />

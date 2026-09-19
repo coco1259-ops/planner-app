@@ -10,28 +10,23 @@ import {
   Alert,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
-import dayjs from 'dayjs';
 import { FontAwesome6 } from '@expo/vector-icons';
 import { Screen } from '@/components/Screen';
 import { useSafeRouter, useSafeSearchParams } from '@/hooks/useSafeRouter';
 import { api, TaskType, TaskStatus, TYPE_META, TYPE_ORDER } from '@/utils/api';
+import { todayG8, weekMondayG8, nextMondayG8, periodOfWeekG8 } from '@/utils/gmt8';
 
 // 兼容单个时间（09:00）与时间段范围（4:00-7:00）
 // eslint-disable-next-line regexp/no-unused-capturing-group
 const TIME_PATTERN = /^\d{1,2}:\d{2}(?:-\d{1,2}:\d{2})?$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-const TODAY = () => dayjs().format('YYYY-MM-DD');
-// 计算本周周一的日期
-export const WEEK_MONDAY = () => dayjs().startOf('week').add(1, 'day').format('YYYY-MM-DD');
+const TODAY = todayG8;
+// 计算本周周一（GMT+8）的日期
+export const WEEK_MONDAY = weekMondayG8;
 // 计算下周周一：本周周一 + 7 天
-const NEXT_MONDAY = () => dayjs(WEEK_MONDAY()).add(7, 'day').format('YYYY-MM-DD');
+const NEXT_MONDAY = nextMondayG8;
 // 由归属周一判断其属于本周还是下周
-const PERIOD_OF_WEEK = (monday: string): 'this' | 'next' => {
-  const thisMon = WEEK_MONDAY();
-  return monday === thisMon || (monday < thisMon && monday >= dayjs(thisMon).subtract(7, 'day').format('YYYY-MM-DD'))
-    ? 'this'
-    : 'next';
-};
+const PERIOD_OF_WEEK = periodOfWeekG8;
 
 type WeekPeriod = 'this' | 'next';
 

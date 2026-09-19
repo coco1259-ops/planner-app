@@ -17,18 +17,19 @@ import ChatInputBar from '@/components/ChatInputBar';
 import ChatOverlay, { ChatMsg } from '@/components/ChatOverlay';
 import { useSafeRouter } from '@/hooks/useSafeRouter';
 import { api, Task, TYPE_META } from '@/utils/api';
+import { weekMondayG8, nextMondayG8, weekSundayG8, nextSundayG8, todayG8 } from '@/utils/gmt8';
 import RNSSE from 'react-native-sse';
 
 const API_BASE = (process.env.EXPO_PUBLIC_BACKEND_BASE_URL ?? '').replace(/\/$/, '');
 
-// 本周周一日期
-const WEEK_MONDAY = () => dayjs().startOf('week').add(1, 'day').format('YYYY-MM-DD');
+// 本周周一日期（GMT+8）
+const WEEK_MONDAY = weekMondayG8;
 // 本周周日日期
-const WEEK_SUNDAY = () => dayjs().startOf('week').add(7, 'day').format('YYYY-MM-DD');
+const WEEK_SUNDAY = weekSundayG8;
 // 下周周一（本周周一 + 7 天）
-const NEXT_MONDAY = () => dayjs(WEEK_MONDAY()).add(7, 'day').format('YYYY-MM-DD');
+const NEXT_MONDAY = nextMondayG8;
 // 下周周日
-const NEXT_SUNDAY = () => dayjs(WEEK_MONDAY()).add(13, 'day').format('YYYY-MM-DD');
+const NEXT_SUNDAY = nextSundayG8;
 
 // 依据当前所选周期算出 [monday, sunday]
 function rangeForPeriod(period: 'this' | 'next'): { monday: string; sunday: string } {
@@ -444,7 +445,7 @@ export default function WeeklyPage() {
         {/* 常驻 AI 输入条 */}
         <ChatInputBar
           onSend={sendChat}
-          onAdd={() => router.push('/task-detail', { date: dayjs().format('YYYY-MM-DD') })}
+          onAdd={() => router.push('/task-detail', { date: todayG8() })}
         />
 
         {/* 对话浮层 */}

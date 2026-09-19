@@ -1,19 +1,14 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { getSupabaseClient } from '../storage/database/supabase-client';
+import { weekMondayG8 } from '../utils/gmt8';
 
 const router = Router();
 const db = getSupabaseClient();
 
-// 返回当前周的周一日期（YYYY-MM-DD），作为"归属周"标识
-function getMondayOfWeek(now: Date = new Date()): string {
-  const d = new Date(now);
-  // getDay()：0=周日 .. 6=周六；周一偏移到本周一
-  d.setDate(d.getDate() + ((1 - d.getDay() + 7) % 7));
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+// 返回当前周的周一日期（YYYY-MM-DD，GMT+8），作为"归属周"标识
+function getMondayOfWeek(): string {
+  return weekMondayG8();
 }
 
 export const TASK_TYPES = [

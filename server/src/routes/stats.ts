@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import dayjs from 'dayjs';
 import { getSupabaseClient } from '../storage/database/supabase-client';
+import { todayG8, lastWeekDaysG8 } from '../utils/gmt8';
 
 const router = Router();
 const db = getSupabaseClient();
@@ -27,7 +27,7 @@ router.get('/overview', async (_req, res) => {
     const { data, error } = await db.from('tasks').select('plan_date, task_type, status');
     if (error) throw error;
 
-    const today = dayjs().format('YYYY-MM-DD');
+    const today = todayG8();
     let total = 0;
     let todayCount = 0;
     const byType: Record<string, number> = { deep: 0, light: 0, family: 0, study: 0 };
@@ -42,10 +42,11 @@ router.get('/overview', async (_req, res) => {
       if (row.plan_date === today && row.status !== 'abandoned') todayCount += 1;
     }
 
-    const trend = Array.from({ length: 7 }, (_, i) => {
-      const d = dayjs().subtract(6 - i, 'day');
-      return { date: d.format('YYYY-MM-DD'), label: d.format('MM/DD'), count: perDay[d.format('YYYY-MM-DD')] ?? 0 };
-    });
+    const trend = lastWeekDaysG8().map((date) => ({
+      date,
+      label: date.slice(5).replace('-', '/'),
+      count: perDay[date] ?? 0,
+    }));
 
     res.json({
       total,

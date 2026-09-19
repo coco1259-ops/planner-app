@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { getSupabaseClient } from '../storage/database/supabase-client';
+import { todayG8, addDaysG8 } from '../utils/gmt8';
 
 const router = Router();
 const db = getSupabaseClient();
@@ -52,10 +53,8 @@ router.get('/', async (_req, res) => {
  */
 router.get('/pipeline', async (_req, res) => {
   try {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const end = new Date(today);
-    end.setDate(end.getDate() + 7);
+    const today = todayG8(); // "YYYY-MM-DD"（GMT+8）
+    const end = addDaysG8(7);
 
     const { data, error } = await db.from('schedule').select('stages, pub_date');
     if (error) throw error;
@@ -66,8 +65,8 @@ router.get('/pipeline', async (_req, res) => {
       const stages = (r as { stages?: Record<string, { date?: string | null; done?: boolean }> }).stages ?? {};
       for (const [stage, item] of Object.entries(stages)) {
         if (!item?.date || item.done) continue;
-        const d = new Date(item.date + 'T00:00:00');
-        if (isNaN(d.getTime())) continue;
+        const d = item.date as string;
+        if (!datePattern.test(d)) continue;
         if (d >= today && d <= end) {
           counter[stage] = (counter[stage] ?? 0) + 1;
         }

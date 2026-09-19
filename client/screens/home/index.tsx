@@ -11,10 +11,11 @@ import ChatInputBar from '@/components/ChatInputBar';
 import ChatOverlay, { ChatMsg } from '@/components/ChatOverlay';
 import { useSafeRouter } from '@/hooks/useSafeRouter';
 import { api, Task } from '@/utils/api';
+import { todayG8, addDaysG8, diffDaysFromToday, nowG8Time } from '@/utils/gmt8';
 import RNSSE from 'react-native-sse';
 
 const API_BASE = (process.env.EXPO_PUBLIC_BACKEND_BASE_URL ?? '').replace(/\/$/, '');
-const todayStr = () => dayjs().format('YYYY-MM-DD');
+const todayStr = todayG8;
 
 interface OverloadWarning {
   date: string;
@@ -70,14 +71,14 @@ export default function HomePage() {
 
   const currentId = useMemo(() => {
     if (date !== todayStr()) return null;
-    const now = dayjs().format('HH:mm');
+    const now = nowG8Time(); // HH:mm（GMT+8 墙钟）
     let cur: Task | null = null;
     for (const t of tasks) if (t.time_slot <= now) cur = t;
     return cur?.id ?? null;
   }, [tasks, date]);
 
   const shiftDate = (dir: number) => {
-    setDate(dayjs(date).add(dir, 'day').format('YYYY-MM-DD'));
+    setDate(addDaysG8(date, dir));
   };
 
   const clearUndo = () => {
@@ -204,8 +205,7 @@ export default function HomePage() {
 
   const dateLabel = useMemo(() => {
     if (date === todayStr()) return '今天';
-    const d = dayjs(date);
-    const diff = d.diff(dayjs(), 'day');
+    const diff = diffDaysFromToday(date);
     return diff === -1 ? '昨天' : diff === 1 ? '明天' : dayjs(date).format('M月D日');
   }, [date]);
 

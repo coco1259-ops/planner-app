@@ -1,9 +1,29 @@
 import { Router } from 'express';
-import dayjs from 'dayjs';
 import { Config, HeaderUtils, LLMClient } from 'coze-coding-dev-sdk';
 import { getSupabaseClient } from '../storage/database/supabase-client';
 
 const router = Router();
+
+/* ---------- 统一 GMT+8 当前时间工具（生产服务器为 UTC，必须固定 +8，否则日期偏差一天） ---------- */
+const G8_MS = 8 * 3600 * 1000;
+const DAY_MS = 24 * 3600 * 1000;
+const nowG8 = () => new Date(Date.now() + G8_MS);
+/** 今天 "YYYY-MM-DD"（GMT+8 墙钟） */
+const todayG8 = () => nowG8().toISOString().slice(0, 10);
+/** 今天相对 nowG8 加 n 天 */
+const addDaysG8 = (n: number) => {
+  const d = nowG8();
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+/** GMT+8 今天的完整注入串：2026年9月19日 星期六（GMT+8） */
+const todayInjection = () => {
+  const d = nowG8();
+  const week = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'][d.getUTCDay()];
+  const mid = `${d.getUTCFullYear()}年${d.getUTCMonth() + 1}月${d.getUTCDate()}日`;
+  return `${mid} ${week}（GMT+8）`;
+};
+/* ------------------------------------------------------------------ */
 
 // 模型名可配置：
 // - 本地/沙箱：默认用扣子内置模型（走 coze 集成 base url）；
@@ -81,7 +101,13 @@ const SYSTEM_PROMPT = `# 角色
 
 # 通用
 - 不要使用 Markdown 表格，使用分行的纯文本便于移动端阅读
-- 今天是{date}`;
+- 今天是{date}
+
+# 日期与时区换算（铁律）
+- 当前真实日期由系统注入（上方"今天"）：格式为 X年X月X日 星期X（GMT+8）。
+- 所有"今天/明天/后天/下周/归属周"的换算必须严格基于这条注入的当前日期和 GMT+8 时区计算，严禁自行推测日期。
+- 明天 = 注入日期 +1 天；后天 = +2 天；一周从周一开始；"下周"指当前周(周一到周日)之后的下一周。
+- 任何写库的日期字段必须为 "YYYY-MM-DD" 具体日期字符串，禁止写"明天""下周"等相对词。`;
 
 const TASK_TYPES = ['deep', 'light', 'personal', 'study', 'goal'] as const;
 type TaskType = (typeof TASK_TYPES)[number];
@@ -104,7 +130,7 @@ function cleanTimeSlot(slot: string): string {
 
 function cleanDate(d: string): string {
   if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
-  return dayjs().format('YYYY-MM-DD');
+  return todayG8();
 }
 
 /**
@@ -124,8 +150,8 @@ router.post('/plan', async (req, res) => {
   res.setHeader('Connection', 'keep-alive');
 
   const messages = Array.isArray(req.body?.messages) ? req.body.messages : [];
-  const today = dayjs().format('M月D日');
-  const todayStr = dayjs().format('YYYY-MM-DD');
+  const today = todayInjection(); // "2026年9月19日 星期六（GMT+8）"
+  const todayStr = todayG8(); // "2026-09-19"
 
   const history = messages
     .filter((m: { role?: string; content?: string }) => m && typeof m.content === 'string')
@@ -221,7 +247,7 @@ async function extractAndInsertTasks(
 [{"title":"写季度报告","remark":"整理数据","time_slot":"09:00","estimated_duration":"1小时","task_type":"deep","plan_date":"${todayStr}"}]
 
 规则：
-- plan_date：默认为 ${todayStr}；若提到"明天"则用 ${dayjs().add(1, 'day').format('YYYY-MM-DD')}；"后天"用 ${dayjs().add(2, 'day').format('YYYY-MM-DD')}。
+- plan_date：默认为 ${todayStr}（这是今天的真实日期，由系统注入，必为 GMT+8 日期）；若提到"明天"则用 ${addDaysG8(1)}；"后天"用 ${addDaysG8(2)}。计算时只能基于这段话里给出的今天日期 ${todayStr} 加减，禁止另行推测。
 - time_slot：根据时间描述推断成 HH:MM（如"上午9点"→09:00，"下午两点"→14:00）；无法判断则用 09:00。
 - estimated_duration：根据指令推断预计时长，用中文描述（如"30分钟""1小时""1小时30分钟"）；无法判断则用空字符串。
 - task_type：深度专注工作/写脚本/剪辑=deep；零散小事/回评论/审核AI产出/浏览素材=light；个人事务/陪娃外私事=personal；学习/读书/背单词/上课=study；目标=goal。
@@ -375,7 +401,7 @@ async function maybeCreateSchedule(client: LLMClient, userText: string): Promise
 {"status":true,"project_name":"...","schedule_type":"商单|科普选题","client_name":"...或空","pub_date":"YYYY-MM-DD"}
 
 规则：
-- pub_date 仅当用户明确给出发布日期；否则可根据今天(${dayjs().format('YYYY-MM-DD')})及"下周/周五/月底"推算出合理日期；仍无法确定返回空字符串。
+- pub_date 仅当用户明确给出发布日期；否则可根据今天(${todayG8()}，今天真实日期)及"下周/周五/月底"推算出合理日期；推算时只能基于 ${todayG8()} 在 GMT+8 时区加减，禁止另行推测；仍无法确定返回空字符串。
 - 只填用户明确确认的信息，缺少关键字段也填，交由上层判断。
 - 用户只是在闲聊或询问建议而非确定要建排期，返回 {"status":false}。
 
