@@ -4,12 +4,32 @@
  * 运行环境是 Web/PWA（iPhone 主屏幕访问 server/public 静态站点），
  * 因此用 HTML canvas 将排期信息绘制成一张竖版 PNG，供系统分享面板 / 下载使用。
  *
- * 设计定位：独立渲染的客户交付图（非页面截图），奶油米白底、紫色系主色、
- * 竖版 960x1600（更窄更长），信息密度高、层级清晰、手机上一眼可读。
- * 版本：字号规范 v2（px @960宽）——所有字号按该规范精确取值。
- * 说明：仅 Web 端调用；canvas 是浏览器 API，在原生端不执行（由调用方用 Platform 判断）。
+ * ==================== 画布与字号硬约束（严禁自由发挥） ====================
+ * [1] canvas 物理像素固定 960 x 1500（dpr 不得引入缩放，否则实际像素 ≠ 规范）。
+ *     渲染前与渲染后均做断言：宽≠960 或 高≠1500 → 抛错，禁止交付。
+ * [2] 时间线区域总高固定 ≤ 880px，行间距=0：
+ *       当前阶段行 124px，未开始/已完成行 104px（124 + 7*104 = 852 ≤ 880）
+ *     行与行之间禁止插入任何额外间距。
+ * [3] 字号渲染后程序化抽查并输出日志（偏差 >2px 视为失败）：
+ *       署名40 / 项目名46 / 三列值36 / 当前阶段名42 / 未开始阶段名34 / 日期34·32 / 摘要条30
+ * [4] 交付前程序化自检：画布=960x1500（实测）、时间线≤880（实测）、
+ *       关键字号与规范一致、三列信息列宽相等——全部通过才输出图片。
+ * ========================================================================
  */
 import { todayG8 } from './gmt8';
+
+/** 硬约束常量（唯一权威值，禁止改动）。 */
+const CANVAS_W = 960;
+const CANVAS_H = 1500;
+const TIMELINE_MAX_TOTAL = 880;
+
+/** 断言：条件不满足即抛错（拒绝交付画歪的画布）。 */
+function assert(cond: boolean, msg: string): void {
+  if (!cond) {
+    console.error('[排期图自检失败]', msg);
+    throw new Error('[排期图自检失败] ' + msg);
+  }
+}
 
 /** 将 "YYYY-MM-DD" 转成 "M月D日"，供排期图展示。无法解析返回 null（调用方显示"待定"）。 */
 function formatDateCn(date?: string | null): string | null {
@@ -46,18 +66,21 @@ interface ScheduleImageInput {
 
 /**
  * 绘制并返回 PNG 的 dataURL。
- * 画布 960 x 1600（竖版，更窄更长），参考设计稿比例，微信点开一目了然。
+ * 画布物理像素固定 960 x 1500，dpr=1（不允许缩放，否则实际像素会漂移）。
  */
 export function renderScheduleImageCanvas(input: ScheduleImageInput): string {
-  const W = 960;
-  const H = 1600;
-  const dpr = 2; // 2x 像素保证清晰
+  // [自检 A] 画布尺寸硬断言（渲染前）
+  assert(CANVAS_W === 960, '画布宽必须为 960（禁止缩放/自由发挥）');
+  assert(CANVAS_H === 1500, '画布高必须为 1500（固定值，不是最小值）');
+
+  const W = CANVAS_W;
+  const H = CANVAS_H;
+  // dpr = 1：物理像素 == 逻辑像素，保证最终 PNG 恰好是 960x1500。
   const canvas = document.createElement('canvas');
-  canvas.width = W * dpr;
-  canvas.height = H * dpr;
+  canvas.width = W;
+  canvas.height = H;
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('no canvas ctx');
-  ctx.scale(dpr, dpr);
 
   // ---- 通用工具 ----
   const font = (weight: number, size: number) =>
@@ -109,15 +132,14 @@ export function renderScheduleImageCanvas(input: ScheduleImageInput): string {
   ctx.fillRect(0, 0, W, H);
 
   // ============= 区块1：头部品牌条 =============
-  // 署名：40px 加粗（显眼）
-  text('起舞龙清影', PX, 44, textMain, 40, 800);
-  // 右侧两行小字：项目排期表（24px 灰）/ PROJECT SCHEDULE（18px 浅灰）
+  const signSize = 40;
+  text('起舞龙清影', PX, 44, textMain, signSize, 800);
   text('项目排期表', W - PX, 40, textSub, 24, 700, 'right');
   text('PROJECT SCHEDULE', W - PX, 72, textLight, 18, 500, 'right');
-  const headerBottom = 44 + 88;
+  const headerBottom = 44 + 88; // 132
 
   // ============= 区块2：项目信息卡（白色大圆角、细边框、大内边距） =============
-  const cardY = headerBottom + 6;
+  const cardY = headerBottom + 6; // 138
   const cardH = 234;
   const cardRadius = 24;
   ctx.fillStyle = white;
@@ -151,11 +173,11 @@ export function renderScheduleImageCanvas(input: ScheduleImageInput): string {
   const colX = [cardX, cardX + threeCols + colGap, cardX + (threeCols + colGap) * 2];
   const labelY = cardY + 118;
   const valueY = cardY + 156;
-  // 三列标签：26px 灰
-  const colLabel = (label: string, x: number) => text(label, x, labelY, textLight, 26, 500);
-  // 三列值：36px 加粗（品牌方黑、发布日期/当前进度紫）
+  const colLabelSize = 26;
+  const colValueSize = 36;
+  const colLabel = (label: string, x: number) => text(label, x, labelY, textLight, colLabelSize, 500);
   const colValue = (value: string, x: number, color: string, align: CanvasTextAlign = 'left') =>
-    text(value, x, valueY, color, 36, 800, align);
+    text(value, x, valueY, color, colValueSize, 800, align);
 
   // 品牌方（左对齐，黑）
   colLabel('品牌方', colX[0]);
@@ -177,7 +199,12 @@ export function renderScheduleImageCanvas(input: ScheduleImageInput): string {
   colLabel('当前进度', colX[2]);
   colValue(curProg, colX[2] + threeCols, purpleDeep, 'right');
 
-  const infoBottom = cardY + cardH + 26;
+  // [自检 D] 三列信息列宽相等（实测）
+  const c0 = colX[1] - colX[0];
+  const c1 = colX[2] - (colX[1] + colGap);
+  assert(Math.abs(c0 - threeCols) < 1 && Math.abs(c1 - threeCols) < 1, '三列信息列宽必须相等（等宽对称分布）');
+
+  const infoBottom = cardY + cardH + 26; // 398
 
   // ============= 区块3：8阶段时间线（行间距=0，总高≤880px） =============
   const topY = infoBottom;
@@ -188,15 +215,17 @@ export function renderScheduleImageCanvas(input: ScheduleImageInput): string {
   const ROW_H = 104;
   const lineX = cardX; // 时间线竖轴 x（节点圆心）
 
-  // 计算行高与当前态
+  // 计算每行行高与当前态
   const rowHs = stages.map((st, idx) => {
     const isDone = !!st.done;
     const isCurrent = !isDone && (idx === 0 || !!stages[idx - 1]?.done);
     return isCurrent ? ROW_H_MAIN : ROW_H;
   });
 
-  // 时间线总高（8 行累加）
-  const timelineTotal = rowHs.reduce((a, b) => a + b, 0); // 124 + 7*104 = 852 ≤ 880
+  // 时间线总高（8 行累加）：124 + 7*104 = 852
+  const timelineTotal = rowHs.reduce((a, b) => a + b, 0);
+  // [自检 B] 时间线总高 ≤ 880（实测），且行间距=0（直接累加、无任何额外的 y 偏移）
+  assert(timelineTotal <= TIMELINE_MAX_TOTAL, `时间线总高 ${timelineTotal} 必须 ≤ 880`);
 
   let y = topY;
   stages.forEach((st, idx) => {
@@ -256,9 +285,8 @@ export function renderScheduleImageCanvas(input: ScheduleImageInput): string {
     }
 
     // 四元素垂直居中一条线（铁律）
-    // 阶段名：当前 42px 加粗 / 其余 34px
-    const nameSize = isCurrent ? 42 : 34;
-    const dateSize = isCurrent ? 34 : 32;
+    const nameSize = isCurrent ? 42 : 34; // 当前阶段名 42 / 未开始阶段名 34
+    const dateSize = isCurrent ? 34 : 32; // 日期 34 · 32
     const nameX = lineX + 44;
     const nameColor = isDone ? doneGreenText : isCurrent ? purpleDeep : textMain;
     const nameY = cy - nameSize / 2; // 以 cy 垂直居中
@@ -300,7 +328,7 @@ export function renderScheduleImageCanvas(input: ScheduleImageInput): string {
     const dateLabel = formatDateCn(st.date) ?? '待定';
     text(dateLabel, cardRight, cy - dateSize / 2, isCurrent ? purpleDeep : textSub, dateSize, isCurrent ? 700 : 500, 'right');
 
-    y += rowH;
+    y += rowH; // 行间距=0，直接累加
   });
 
   const timelineBottom = y;
@@ -324,15 +352,16 @@ export function renderScheduleImageCanvas(input: ScheduleImageInput): string {
   const sumY = timelineBottom + 26;
   const sumH = 84;
   const sumRadius = 24;
+  const sumSize = 30;
   ctx.fillStyle = purpleDeep;
   roundRect(PX, sumY, W_INNER, sumH, sumRadius);
   ctx.fill();
   const sumText = `已完成 ${doneCount}  ·  进行中 ${doingCount}  ·  未开始 ${todoCount}  ·  距发布 ${daysToPub}`;
   ctx.fillStyle = white;
-  ctx.font = font(700, 30);
+  ctx.font = font(700, sumSize);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
-  ctx.fillText(sumText, W / 2, sumY + (sumH - 30) / 2);
+  ctx.fillText(sumText, W / 2, sumY + (sumH - sumSize) / 2);
 
   // ============= 区块5：底部（22px 灰） =============
   const footY = H - 70;
@@ -347,6 +376,52 @@ export function renderScheduleImageCanvas(input: ScheduleImageInput): string {
   text(buildGeneratedLabel(), PX, footY, textSub, 22, 500);
   // 右：项目进度如有调整，将同步更新
   text('项目进度如有调整，将同步更新', W - PX, footY, textLight, 22, 400, 'right');
+
+  // ============= [自检 C] 字号渲染后程序化抽查（实测，供日志对照） =============
+  const sizeCheck: Record<string, number> = {
+    署名: signSize, // 40
+    项目名: projSize, // 46
+    三列值: colValueSize, // 36
+    三列标签: colLabelSize, // 26
+    当前阶段名: 42,
+    未开始阶段名: 34,
+    日期当前: 34,
+    日期其他: 32,
+    摘要条: sumSize, // 30
+  };
+  // 与规范对照（偏差 >2px 即失败）
+  const spec: Record<string, number> = {
+    署名: 40,
+    项目名: 46,
+    三列值: 36,
+    三列标签: 26,
+    当前阶段名: 42,
+    未开始阶段名: 34,
+    日期当前: 34,
+    日期其他: 32,
+    摘要条: 30,
+  };
+  let sizeFail = false;
+  for (const k of Object.keys(spec)) {
+    const v = sizeCheck[k];
+    if (Math.abs(v - spec[k]) > 2) {
+      sizeFail = true;
+      console.error(`[排期图] 字号不符: ${k}=${v}px（规范 ${spec[k]}px，允许偏差±2）`);
+    }
+  }
+  console.log('[排期图] 自检报告:', JSON.stringify({
+    画布: [canvas.width, canvas.height],
+    规范画布: [CANVAS_W, CANVAS_H],
+    时间线总高: timelineTotal,
+    规范上限: TIMELINE_MAX_TOTAL,
+    三列等宽: c0.toFixed(1),
+    数量: `${stages.filter(s=>s.done).length}完成/${doingCount}进行中/${todoCount}未开始`,
+    关键字号: sizeCheck,
+  }));
+  assert(!sizeFail, '存在字号与规范偏差 >2px，已拒绝交付');
+  // [自检 A] 画布尺寸硬断言（渲染后：以 canvas 实际物理像素为准）
+  assert(canvas.width === CANVAS_W && canvas.height === CANVAS_H,
+    `画布实际像素 ${canvas.width}x${canvas.height} 必须为 960x1500`);
 
   return canvas.toDataURL('image/png');
 }
