@@ -165,15 +165,15 @@ export function renderScheduleImageCanvas(input: ScheduleImageInput): string {
 
   // ============= 区块1：顶部品牌条 =============
   // 布局约束（本次局部调整）：
-  //   - 左边"起舞龙清影"：字号占比放大（原45→72，占画布宽≈12.5%，无重叠可容纳的最大值），
+  //   - 左边"起舞龙清影"：字号占比放大（原45→72→96，占画布宽≈16.7%，无重叠可容纳的最大值），
   //     上下留白相同(垂直居中)、左对齐，"起"字 x=PX 与卡片左边框对齐。
   //   - 右边"项目排期表"与左署名同一条水平基线；"PROJECT SCHEDULE"行距收紧到1倍以内、右对齐，
   //     两行右边缘 x=W-PX 与卡片右边框对齐。
   const headerTop = TOP; // 16
-  const signSize = 72; // 放大后的署名字号（画布宽576下可容纳的无重叠最大值）
+  const signSize = 96; // 放大后的署名字号（画布宽576下可容纳的无重叠最大值，原45→72→96）
   const pad = 18; // 品牌条上下留白（上下相同）
-  const headerBottom = headerTop + signSize + pad * 2; // 16+72+36=124
-  const signBaseline = headerTop + pad + signSize; // 16+18+72=106（左右两行公共基线）
+  const headerBottom = headerTop + signSize + pad * 2; // 16+96+36=148
+  const signBaseline = headerTop + pad + signSize; // 16+18+96=130（左右两行公共基线）
   // 左：起舞龙清影（左对齐→与下方卡片左边框对齐；垂直居中）
   text('起舞龙清影', PX, signBaseline - signSize, textMain, signSize, 800);
   // 右第一行：项目排期表（与左署名同一条水平线，右对齐→与卡片右边框对齐）
@@ -182,7 +182,7 @@ export function renderScheduleImageCanvas(input: ScheduleImageInput): string {
   text('PROJECT SCHEDULE', W - PX, signBaseline + 8, textLight, F.headEN, 500, 'right');
 
   // ============= 区块2：项目信息卡（三列） =============
-  const cardY = headerBottom + GAP; // 124
+  const cardY = headerBottom + GAP; // 148+16=164
   const cardH = BH.card;
   const cardRadius = 20;
   ctx.fillStyle = white;
@@ -411,9 +411,9 @@ export function renderScheduleImageCanvas(input: ScheduleImageInput): string {
     日期占比: ratio(F.dateOther),
     摘要条占比: ratio(F.sum),
   };
-  // 目标占比（按 W=576 的手机观感：署名放大后≈12.5%、大标题≈9%、正文≈6.6%、标签≈5.2%）
+  // 目标占比（按 W=576 的手机观感：署名放大后≈16.7%、大标题≈9%、正文≈6.6%、标签≈5.2%）
   const specRatio: Record<string, number> = {
-    署名占比: 12.5,
+    署名占比: 16.7,
     项目名占比: 9.0,
     三列值占比: 6.9,
     当前阶段名占比: 8.2,
