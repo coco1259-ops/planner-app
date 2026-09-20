@@ -10,6 +10,7 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@napi-rs/canvas": "^1.0.9",
     "@supabase/supabase-js": "2.95.3",
     "cors": "^2.8.5",
     "coze-coding-dev-sdk": "^0.7.28",
