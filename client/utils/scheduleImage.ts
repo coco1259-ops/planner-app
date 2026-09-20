@@ -164,11 +164,22 @@ export function renderScheduleImageCanvas(input: ScheduleImageInput): string {
   ctx.fillRect(0, 0, W, H);
 
   // ============= 区块1：顶部品牌条 =============
-  const headerTop = TOP; // 20
-  const headerBottom = headerTop + BH.header; // 108
-  text('起舞龙清影', PX, headerTop + 8, textMain, F.sign, 800);
-  text('项目排期表', W - PX, headerTop + 6, textSub, F.headCN, 700, 'right');
-  text('PROJECT SCHEDULE', W - PX, headerTop + 36, textLight, F.headEN, 500, 'right');
+  // 布局约束（本次局部调整）：
+  //   - 左边"起舞龙清影"：字号占比放大（原45→72，占画布宽≈12.5%，无重叠可容纳的最大值），
+  //     上下留白相同(垂直居中)、左对齐，"起"字 x=PX 与卡片左边框对齐。
+  //   - 右边"项目排期表"与左署名同一条水平基线；"PROJECT SCHEDULE"行距收紧到1倍以内、右对齐，
+  //     两行右边缘 x=W-PX 与卡片右边框对齐。
+  const headerTop = TOP; // 16
+  const signSize = 72; // 放大后的署名字号（画布宽576下可容纳的无重叠最大值）
+  const pad = 18; // 品牌条上下留白（上下相同）
+  const headerBottom = headerTop + signSize + pad * 2; // 16+72+36=124
+  const signBaseline = headerTop + pad + signSize; // 16+18+72=106（左右两行公共基线）
+  // 左：起舞龙清影（左对齐→与下方卡片左边框对齐；垂直居中）
+  text('起舞龙清影', PX, signBaseline - signSize, textMain, signSize, 800);
+  // 右第一行：项目排期表（与左署名同一条水平线，右对齐→与卡片右边框对齐）
+  text('项目排期表', W - PX, signBaseline - F.headCN, textSub, F.headCN, 700, 'right');
+  // 右第二行：PROJECT SCHEDULE（行距收紧≈1倍以内，右对齐）
+  text('PROJECT SCHEDULE', W - PX, signBaseline + 8, textLight, F.headEN, 500, 'right');
 
   // ============= 区块2：项目信息卡（三列） =============
   const cardY = headerBottom + GAP; // 124
@@ -376,7 +387,8 @@ export function renderScheduleImageCanvas(input: ScheduleImageInput): string {
   ctx.fillText(sumText, W / 2, sumY + (sumH - sumSize) / 2);
 
   // ============= 区块5：底部 =============
-  const footY = H - 90; // 1118
+  // 底部随上方区块下移（衔接摘要条之后），用画布底部留白吸收品牌条增高的余量
+  const footY = sumY + sumH + GAP + 38; // 摘要条之后留出间距，再把文字放到分割线下方
   ctx.strokeStyle = cardBorder;
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -390,7 +402,7 @@ export function renderScheduleImageCanvas(input: ScheduleImageInput): string {
   // ============= [自检 C] 字号实际占画布宽比例自检（对照目标占比，偏差>2个百分点 抛错） =============
   const ratio = (v: number) => (v / W) * 100; // 字占画布宽百分比
   const ratioCheck: Record<string, number> = {
-    署名占比: ratio(F.sign),
+    署名占比: ratio(signSize), // 实际放大后的署名字号
     项目名占比: ratio(F.proj),
     三列值占比: ratio(F.colValue),
     当前阶段名占比: ratio(F.nameCur),
@@ -399,9 +411,9 @@ export function renderScheduleImageCanvas(input: ScheduleImageInput): string {
     日期占比: ratio(F.dateOther),
     摘要条占比: ratio(F.sum),
   };
-  // 目标占比（按 W=576 的手机观感：大标题≈9%、正文≈6.6%、标签≈5.2%）
+  // 目标占比（按 W=576 的手机观感：署名放大后≈12.5%、大标题≈9%、正文≈6.6%、标签≈5.2%）
   const specRatio: Record<string, number> = {
-    署名占比: 7.8,
+    署名占比: 12.5,
     项目名占比: 9.0,
     三列值占比: 6.9,
     当前阶段名占比: 8.2,
