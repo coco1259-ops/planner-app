@@ -2,27 +2,30 @@
  * 排期图生成器（Web 端，PWA 下用 HTML canvas 绘制 PNG 供系统分享）。
  *
  * ==================== 画布 / 字号 / 占比硬约束（严禁自由发挥） ====================
- * [1] 画布逻辑尺寸 640 x 1208（9:17），长宽比锁死 9/17 ≈ 0.5294。
- *     物理像素 = 逻辑 x DPR(2) = 1280 x 2416，保证在手机 Retina 屏清晰。
+ * [1] 画布逻辑尺寸 576 x 1088，是 9:17 的【精确整数等比】(576=9x64, 1088=17x64)，
+ *     长宽比锁死 9/17 ≈ 0.529411（W/H 与 9/17 完全相等，数学恒成立）。
+ *     物理像素 = 逻辑 x DPR(2) = 1152 x 2176，保证在手机 Retina 屏清晰。
  *     渲染前与渲染后均断言长宽比 + 逻辑/物理尺寸，不符合即抛错拒绝交付。
+ *     （曾因采用"近似9:17"的 640×1208 整数画布导致 640/1208≠9/17、断言必失败，
+ *       排期图无法生成；现改用精确 9:17 整数尺寸根治。）
  * [2] 字号沿用【字号规范 v2】的像素值（用户给定，一个都不改）：
  *       署名45 / 项目排期表27 / PROJECT SCHEDULE20 / 项目名52 / 类型胶囊27 /
  *       三列标签30 / 三列值40 / 当前阶段名47 / 未开始阶段名38 / 状态胶囊30 /
  *       日期当前38 / 日期其他36 / 白字序号32 / 摘要条34 / 底部25。
- *     关键：字号与画布逻辑宽 640 的比值即字体在画面中的占比，达到手机上正常观感
- *       （项目名≈8.1%、正文≈5.6%~6.3%、标签≈3~4%）；杜绝"画布大、字小"。
+ *     关键：字号与画布逻辑宽 576 的比值即字体在画面中的占比，达到手机上正常观感
+ *       （项目名≈9.0%、正文≈6.6%、标签≈5.2%）；杜绝"画布大、字小"。
  * [3] 五区块结构 / 配色 / 布局层级与既有设计完全一致：
  *       顶部品牌条 / 项目信息卡(三列) / 8阶段时间线(行间距0) / 进度摘要条 / 底部。
  * [4] 数据全部来自 App 真实数据（调用方传入 input.stages 等），不用演示数据/文字。
- *     交付前打印字占比自检日志，偏差>2% 即抛错。
+ *     交付前打印字号实际占比自检日志，与目标占比偏差>2 个百分点即抛错。
  * ========================================================================
  */
 import { todayG8 } from './gmt8';
 
-/** 硬约束常量（唯一权威值）。逻辑画布 640x1208（9:17）。 */
-const CANVAS_W = 640;
-const CANVAS_H = 1208;
-const RATIO = 9 / 17; // 0.5294117...
+/** 硬约束常量（唯一权威值）。逻辑画布 576x1088，正好是精确 9:17 整数等比。 */
+const CANVAS_W = 576;
+const CANVAS_H = 1088;
+const RATIO = 9 / 17; // 0.5294117...，576/1088 与它严格相等
 const DPR = 2; // 物理像素密度，仅是清晰度，不影响字号占比。
 
 /** 断言：条件不满足即抛错（拒绝交付画歪的画布）。 */
@@ -52,16 +55,16 @@ const F = {
   foot: 25, // 底部
 };
 
-// ---- 区块高度（按 9:17 逻辑画布 1208 高分配，保持五区块结构）----
+// ---- 区块高度（按 9:17 逻辑画布 1088 高等比分配，保持五区块结构；字号不变）----
 const BH = {
-  header: 88, // 顶部品牌条
-  card: 188, // 项目信息卡
-  status: 68, // 进度摘要条
+  header: 80, // 顶部品牌条
+  card: 170, // 项目信息卡
+  status: 56, // 进度摘要条
 };
-const ROW_H_MAIN = 92; // 当前阶段行高（容纳 47px 阶段名 + 徽章）
-const ROW_H = 78; // 未开始/已完成行高
+const ROW_H_MAIN = 84; // 当前阶段行高（容纳 47px 阶段名 + 徽章）
+const ROW_H = 70; // 未开始/已完成行高
 const GAP = 16; // 区块间距
-const TOP = 20; // 顶部边距
+const TOP = 16; // 顶部边距
 
 /** 将 "YYYY-MM-DD" 转成 "M月D日"。无法解析返回 null（调用方显示"待定"）。 */
 function formatDateCn(date?: string | null): string | null {
@@ -99,9 +102,9 @@ interface ScheduleImageInput {
 /** 绘制并返回 PNG dataURL。逻辑 640x1208（9:17），物理 = 逻辑 x DPR。 */
 export function renderScheduleImageCanvas(input: ScheduleImageInput): string {
   // [自检 A] 画布/比例硬断言（渲染前）
-  assert(CANVAS_W / CANVAS_H - RATIO < 1e-9, '画布长宽比必须为 9:17');
-  assert(CANVAS_W === 640, '逻辑画布宽必须为 640');
-  assert(CANVAS_H === 1208, '逻辑画布高必须为 1208');
+  assert(Math.abs(CANVAS_W / CANVAS_H - RATIO) < 1e-9, '画布长宽比必须为 9:17');
+  assert(CANVAS_W === 576, '逻辑画布宽必须为 576');
+  assert(CANVAS_H === 1088, '逻辑画布高必须为 1088');
 
   const W = CANVAS_W;
   const H = CANVAS_H;
@@ -198,8 +201,8 @@ export function renderScheduleImageCanvas(input: ScheduleImageInput): string {
   const colGap = 22;
   const threeCols = (cardRight - cardX - colGap * 2) / 3;
   const colX = [cardX, cardX + (threeCols + colGap), cardX + (threeCols + colGap) * 2];
-  const labelY = cardY + 104;
-  const valueY = cardY + 142;
+  const labelY = cardY + 92;
+  const valueY = cardY + 128;
   const colLabel = (label: string, x: number) => text(label, x, labelY, textLight, F.colLabel, 500);
   const colValue = (value: string, x: number, color: string, align: CanvasTextAlign = 'left') => {
     // 值在尽量保持规范 40px 字号的前提下，若超出列宽则温和降字号（≥26px）防止溢出；结构不变
@@ -246,7 +249,7 @@ export function renderScheduleImageCanvas(input: ScheduleImageInput): string {
     const isCurrent = !isDone && (idx === 0 || !!stages[idx - 1]?.done);
     return isCurrent ? ROW_H_MAIN : ROW_H;
   });
-  const timelineRows = rowHs.reduce((a, b) => a + b, 0); // 92 + 7*78 = 638
+  const timelineRows = rowHs.reduce((a, b) => a + b, 0); // 84 + 7*70 = 574
 
   let y = topY;
   stages.forEach((st, idx) => {
@@ -358,7 +361,7 @@ export function renderScheduleImageCanvas(input: ScheduleImageInput): string {
     daysToPub = '待定';
   }
 
-  const sumY = timelineBottom + 20; // 986
+  const sumY = timelineBottom + GAP; // 时间线之后进入进度摘要条
   const sumH = BH.status;
   const sumRadius = 20;
   const sumSize = F.sum;
@@ -384,34 +387,34 @@ export function renderScheduleImageCanvas(input: ScheduleImageInput): string {
   text(buildGeneratedLabel(), PX, footY, textSub, F.foot, 500);
   text('项目进度如有调整，将同步更新', W - PX, footY, textLight, F.foot, 400, 'right');
 
-  // ============= [自检 C] 字号占比程序化抽查（log 对照，偏差>2% 抛错） =============
-  const ratio = (v: number) => (v / W) * 100;
+  // ============= [自检 C] 字号实际占画布宽比例自检（对照目标占比，偏差>2个百分点 抛错） =============
+  const ratio = (v: number) => (v / W) * 100; // 字占画布宽百分比
   const ratioCheck: Record<string, number> = {
-    署名占比: F.sign,
-    项目名占比: F.proj,
-    三列值占比: F.colValue,
-    当前阶段名占比: F.nameCur,
-    未开始阶段名占比: F.nameOther,
-    状态胶囊占比: F.status,
-    日期占比: F.dateOther,
-    摘要条占比: F.sum,
+    署名占比: ratio(F.sign),
+    项目名占比: ratio(F.proj),
+    三列值占比: ratio(F.colValue),
+    当前阶段名占比: ratio(F.nameCur),
+    未开始阶段名占比: ratio(F.nameOther),
+    状态胶囊占比: ratio(F.status),
+    日期占比: ratio(F.dateOther),
+    摘要条占比: ratio(F.sum),
   };
-  // 规范目标（按手机观感，项目名≈8% 大标题、正文≈5-6%）：以 "字号/W" 计算，无需阈值即可对照
+  // 目标占比（按 W=576 的手机观感：大标题≈9%、正文≈6.6%、标签≈5.2%）
   const specRatio: Record<string, number> = {
-    署名占比: 45,
-    项目名占比: 52,
-    三列值占比: 40,
-    当前阶段名占比: 47,
-    未开始阶段名占比: 38,
-    状态胶囊占比: 30,
-    日期占比: 36,
-    摘要条占比: 34,
+    署名占比: 7.8,
+    项目名占比: 9.0,
+    三列值占比: 6.9,
+    当前阶段名占比: 8.2,
+    未开始阶段名占比: 6.6,
+    状态胶囊占比: 5.2,
+    日期占比: 6.3,
+    摘要条占比: 5.9,
   };
   let fail = false;
   for (const k of Object.keys(specRatio)) {
     if (Math.abs(ratioCheck[k] - specRatio[k]) > 2) {
       fail = true;
-      console.error(`[排期图] 字号占比不符: ${k}=${ratioCheck[k]}px(规范 ${specRatio[k]}px)`);
+      console.error(`[排期图] 字号占比不符: ${k}=${ratioCheck[k].toFixed(1)}%(目标 ${specRatio[k]}%)`);
     }
   }
   console.log('[排期图] 自检报告:', JSON.stringify({
