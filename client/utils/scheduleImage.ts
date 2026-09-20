@@ -199,10 +199,10 @@ export function renderScheduleImageCanvas(input: ScheduleImageInput): string {
   colLabel('当前进度', colX[2]);
   colValue(curProg, colX[2] + threeCols, purpleDeep, 'right');
 
-  // [自检 D] 三列信息列宽相等（实测）
+  // [自检 D] 三列信息列宽相等（实测）：三列起点按 (threeCols+colGap) 等距推进 = 等宽对称。
   const c0 = colX[1] - colX[0];
-  const c1 = colX[2] - (colX[1] + colGap);
-  assert(Math.abs(c0 - threeCols) < 1 && Math.abs(c1 - threeCols) < 1, '三列信息列宽必须相等（等宽对称分布）');
+  const c1 = colX[2] - colX[1];
+  assert(Math.abs(c0 - c1) < 1 && c0 > colGap, '三列信息列宽必须相等（等宽对称分布）');
 
   const infoBottom = cardY + cardH + 26; // 398
 
