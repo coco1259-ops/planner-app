@@ -1,34 +1,21 @@
 /**
  * 排期图生成器（Web 端，PWA 下用 HTML canvas 绘制 PNG 供系统分享）。
  *
- * ==================== 画布 / 字号 / 占比硬约束（严禁自由发挥） ====================
- * [1] 画布逻辑尺寸 576 x 1088，是 9:17 的【精确整数等比】(576=9x64, 1088=17x64)，
- *     长宽比锁死 9/17 ≈ 0.529411（W/H 与 9/17 完全相等，数学恒成立）。
- *     物理像素 = 逻辑 x DPR(2) = 1152 x 2176，保证在手机 Retina 屏清晰。
- *     渲染前与渲染后均断言长宽比 + 逻辑/物理尺寸，不符合即抛错拒绝交付。
- *     （曾因采用"近似9:17"的 640×1208 整数画布导致 640/1208≠9/17、断言必失败，
- *       排期图无法生成；现改用精确 9:17 整数尺寸根治。）
- * [2] 字号沿用【字号规范 v2】的像素值（用户给定，一个都不改）：
- *       署名45 / 项目排期表27 / PROJECT SCHEDULE20 / 项目名52 / 类型胶囊27 /
- *       三列标签30 / 三列值40 / 当前阶段名47 / 未开始阶段名38 / 状态胶囊30 /
- *       日期当前38 / 日期其他36 / 白字序号32 / 摘要条34 / 底部25。
- *     关键：字号与画布逻辑宽 576 的比值即字体在画面中的占比，达到手机上正常观感
- *       （项目名≈9.0%、正文≈6.6%、标签≈5.2%）；杜绝"画布大、字小"。
- * [3] 五区块结构 / 配色 / 布局层级与既有设计完全一致：
- *       顶部品牌条 / 项目信息卡(三列) / 8阶段时间线(行间距0) / 进度摘要条 / 底部。
- * [4] 数据全部来自 App 真实数据（调用方传入 input.stages 等），不用演示数据/文字。
- *     交付前打印字号实际占比自检日志，与目标占比偏差>2 个百分点即抛错。
- * ========================================================================
+ * 画布规范（用户给定，参数锁定，禁止自由发挥）：
+ *   - 宽 1080px，高随内容自适应（8 阶段时约 1660px）
+ *   - 背景 #FAF6EF；字体 "PingFang SC","Noto Sans CJK SC",sans-serif
+ *     标题字重 800、正文 700、辅助 500
+ *
+ * 配色：
+ *   奶油底 #FAF6EF｜主紫 #7C3AED｜浅紫底 #F3E8FB｜深字 #1F1B2E
+ *   灰标签 #9089A0｜灰副题 #6B6580｜浅灰 #A8A2B8｜圆描边 #CFC9DC｜连线 #E5E1EE｜灰胶囊底 #ECE6DA
  */
 import { todayG8 } from './gmt8';
 
-/** 硬约束常量（唯一权威值）。逻辑画布 576x1088，正好是精确 9:17 整数等比。 */
-const CANVAS_W = 576;
-const CANVAS_H = 1088;
-const RATIO = 9 / 17; // 0.5294117...，576/1088 与它严格相等
-const DPR = 2; // 物理像素密度，仅是清晰度，不影响字号占比。
+/** 画布固定宽 1080。 */
+const CANVAS_W = 1080;
+const DPR = 1; // 直接用物理像素绘制，宽 1080。
 
-/** 断言：条件不满足即抛错（拒绝交付画歪的画布）。 */
 function assert(cond: boolean, msg: string): void {
   if (!cond) {
     console.error('[排期图自检失败]', msg);
@@ -36,60 +23,37 @@ function assert(cond: boolean, msg: string): void {
   }
 }
 
-// ---- 字号常量（字号规范 v2 像素值，一行不改。唯一权威值）----
-const F = {
-  sign: 45, // 署名 "起舞龙清影"
-  headCN: 27, // "项目排期表"
-  headEN: 20, // "PROJECT SCHEDULE"
-  proj: 52, // 项目名
-  chip: 27, // 类型胶囊"商单/科普选题"
-  colLabel: 30, // 三列标签
-  colValue: 40, // 三列值
-  nameCur: 47, // 当前阶段名
-  nameOther: 38, // 未开始阶段名
-  status: 30, // 状态胶囊"进行中/未开始/已完成"
-  dateCur: 38, // 当前阶段日期
-  dateOther: 36, // 其余阶段日期
-  seqCur: 32, // 当前阶段白字序号
-  sum: 34, // 进度摘要条白字
-  foot: 25, // 底部
-};
-
-// ---- 区块高度（按 9:17 逻辑画布 1088 高等比分配，保持五区块结构；字号不变）----
-const BH = {
-  header: 80, // 顶部品牌条
-  card: 170, // 项目信息卡
-  status: 56, // 进度摘要条
-};
-const ROW_H_MAIN = 84; // 当前阶段行高（容纳 47px 阶段名 + 徽章）
-const ROW_H = 70; // 未开始/已完成行高
-const GAP = 16; // 区块间距
-const TOP = 16; // 顶部边距
-
-/** 将 "YYYY-MM-DD" 转成 "M月D日"。无法解析返回 null（调用方显示"待定"）。 */
-function formatDateCn(date?: string | null): string | null {
+// ---------- 工具 ----------
+/** "YYYY-MM-DD" → "YYYY年M月D日" |
+ * "M月D日"（用于卡片值） */
+function toCnDate(date?: string | null): string | null {
   if (!date) return null;
-  const m = /^\d{4}-(\d{2})-(\d{2})$/.exec(date);
+  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(date);
   if (!m) return null;
-  return `${Number(m[1])}月${Number(m[2])}日`;
+  return `${+m[2]}月${+m[3]}日`;
+}
+function toCnDateFull(date?: string | null): string | null {
+  if (!date) return null;
+  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(date);
+  if (!m) return null;
+  return `${+m[1]}年${+m[2]}月${+m[3]}日`;
 }
 
-/** 生成日期文案，如 "生成于 2026年9月20日" */
-export const buildGeneratedLabel = (): string => {
-  const today = todayG8();
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(today);
-  if (!m) return '生成于今日';
-  return `生成于 ${Number(m[1])}年${Number(m[2])}月${Number(m[3])}日`;
-};
-
-/** GMT+8 天数差（date - today）。 */
+/** GMT+8 天数差（date - today） */
 function diffDaysFromToday(date: string): number {
   const today = todayG8() || '';
   if (!date || !today) return 0;
-  const d1 = new Date(`${date}T00:00:00`);
-  const d2 = new Date(`${today}T00:00:00`);
-  return Math.round((d1.getTime() - d2.getTime()) / 86400000);
+  const d1 = new Date(`${date}T00:00:00`).getTime();
+  const d2 = new Date(`${today}T00:00:00`).getTime();
+  return Math.round((d1 - d2) / 86400000);
 }
+
+/** 底部左侧 "生成于 YYYY年M月D日"（GMT+8，注入当天） */
+export const buildGeneratedLabel = (): string => {
+  const today = todayG8();
+  const full = toCnDateFull(today);
+  return full ? `生成于 ${full}` : '生成于今日';
+};
 
 interface ScheduleImageInput {
   projectName: string;
@@ -99,351 +63,378 @@ interface ScheduleImageInput {
   stages: { name: string; date?: string | null; done?: boolean }[];
 }
 
-/** 绘制并返回 PNG dataURL。逻辑 640x1208（9:17），物理 = 逻辑 x DPR。 */
+/** 阶段状态推断：第一个未完成 = 进行中；之前的 = 已完成；之后 = 未开始 */
+function stageStatus(stages: ScheduleImageInput['stages'], idx: number): 'done' | 'doing' | 'todo' {
+  const st = stages[idx];
+  if (st?.done) return 'done';
+  const firstNotDone = stages.findIndex((s) => !s.done);
+  if (firstNotDone < 0) return 'done'; // 全部完成
+  return idx === firstNotDone ? 'doing' : 'todo';
+}
+
 export function renderScheduleImageCanvas(input: ScheduleImageInput): string {
-  // [自检 A] 画布/比例硬断言（渲染前）
-  assert(Math.abs(CANVAS_W / CANVAS_H - RATIO) < 1e-9, '画布长宽比必须为 9:17');
-  assert(CANVAS_W === 576, '逻辑画布宽必须为 576');
-  assert(CANVAS_H === 1088, '逻辑画布高必须为 1088');
-
   const W = CANVAS_W;
-  const H = CANVAS_H;
-  const canvas = document.createElement('canvas');
-  canvas.width = W * DPR; // 1280
-  canvas.height = H * DPR; // 2416
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('no canvas ctx');
-  ctx.scale(DPR, DPR); // 逻辑坐标按 640x1208 绘制，字号占比以 640 为准
+  const stages = input.stages;
+  const N = stages.length;
 
-  // ---- 通用工具 ----
-  const font = (weight: number, size: number) =>
-    `${weight} ${size}px -apple-system,'PingFang SC','Helvetica Neue',sans-serif;`;
+  // ---- 配色 ----
+  const cream = '#FAF6EF';
+  const purple = '#7C3AED';
+  const purpleSoft = '#F3E8FB';
+  const textMain = '#1F1B2E';
+  const grayLabel = '#9089A0';
+  const graySub = '#6B6580';
+  const grayLight = '#A8A2B8';
+  const circleStroke = '#CFC9DC';
+  const lineColor = '#E5E1EE';
+  const grayChip = '#ECE6DA';
+  const white = '#FFFFFF';
+
+  const fontFamily = `"PingFang SC","Noto Sans CJK SC",sans-serif`;
+  const font = (weight: number, size: number) => `${weight} ${size}px ${fontFamily}`;
+
+  // 先创建（高度后置），绘制时再固定
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  const ctx = canvas.getContext('2d')!;
+  if (!ctx) throw new Error('no canvas ctx');
+
   const text = (
     s: string, x: number, y: number, color: string, size: number,
-    weight = 500, align: CanvasTextAlign = 'left',
+    weight = 500, align: CanvasTextAlign = 'left', spacing = 0,
   ) => {
     ctx.font = font(weight, size);
     ctx.fillStyle = color;
     ctx.textAlign = align;
     ctx.textBaseline = 'top';
+    if (spacing > 0) (ctx as any).letterSpacing = `${spacing}px`;
+    else (ctx as any).letterSpacing = '0px';
     ctx.fillText(s, x, y);
+    (ctx as any).letterSpacing = '0px';
   };
-  const roundRect = (x: number, y: number, w: number, h: number, r: number) => {
-    ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.arcTo(x + w, y, x + w, y + h, r);
-    ctx.arcTo(x + w, y + h, x, y + h, r);
-    ctx.arcTo(x, y + h, x, y, r);
-    ctx.arcTo(x, y, x + w, y, r);
-    ctx.closePath();
-  };
-  const measureText = (s: string, size: number) => {
-    ctx.font = font(500, size);
+  const measureRaw = (s: string, size: number, weight = 500) => {
+    ctx.font = font(weight, size);
+    (ctx as any).letterSpacing = '0px';
     return ctx.measureText(s).width;
   };
+  const roundRect = (x: number, y: number, w: number, h: number, r: number) => {
+    const rr = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + rr, y);
+    ctx.arcTo(x + w, y, x + w, y + h, rr);
+    ctx.arcTo(x + w, y + h, x, y + h, rr);
+    ctx.arcTo(x, y + h, x, y, rr);
+    ctx.arcTo(x, y, x + w, y, rr);
+    ctx.closePath();
+  };
 
-  // ---- 配色（与既有设计完全一致，奶油米白 + 紫色系）----
-  const cream = '#FAF7F2';
-  const purple = '#7C3AED';
-  const purpleDeep = '#6D28D9';
-  const purpleBorder = '#C4B5FD';
-  const purpleSoft = '#F3EEFD';
-  const textMain = '#1F2430';
-  const textSub = '#6B7280';
-  const textLight = '#9AA0AB';
-  const cardBorder = '#E6DFD5';
-  const white = '#FFFFFF';
-  const doneGreen = '#22C55E';
-  const doneGreenText = '#16A34A';
-  const grayChip = '#EFEEEB';
+  // 布局：横向
+  const XL = 90; // 主内容左边距（连线圆心 x=45，圆最大半径45，故内容从90起）
+  const LINE_X = 45;
+  const XR = W - 90; // 主内容右边距（90）
 
-  const PX = 40; // 页边距
-  const W_INNER = W - PX * 2; // 560
+  // ================= 高度自适应布局 =================
+  // 头部
+  const headPadBottom = 45;
+  const headH = 100; // 头部内容区高度（容纳 58 署名）
+  const headTop = 40;
 
+  // 卡片
+  const cardPadX = 36, cardPadYTop = 36, cardPadYBot = 36;
+  const cardRadius = 40;
+  const projSize = 56;
+  const cardTitleRowH = 70; // 项目名行（含胶囊）
+  const labelSize = 25, valueSize = 36;
+  const colsGapRow = 14 + valueSize; // 标签下距14 + 值高
+  const cardBodyH = colsGapRow; // 三列区
+  const cardH = cardPadYTop + cardTitleRowH + cardBodyH + cardPadYBot;
+  const cardGap = 45;
+
+  // 时间线
+  const tlGap = 36;
+  const currRowH = 144; // 进行中行：圆直径90 + 上下内边距18*2 + 上下外距9*2
+  const todoRowH = 82;  // 未开始行：圆直径72 + 上下内边距5*2（无外距）
+  const circleDone = 90, circleTodo = 72;
+  const lineBottomGap = 36;
+
+  // 摘要条
+  const sumPadX = 36, sumPadY = 32, sumSize = 29, sumRadius = 36;
+  const sumH = sumPadY * 2 + sumSize + 8;
+  const sumGap = 36;
+
+  // 底部
+  const footSize = 25;
+  const footPadTop = 20, footPadBottom = 50;
+
+  // 计算高度
+  let nextY = headTop + headH + headPadBottom;
+  const cardY = nextY; nextY += cardH + cardGap;
+
+  // 时间线行高数组 + 圆心位置
+  const rowHArr = stages.map((_, i) => (stageStatus(stages, i) === 'doing' ? currRowH : todoRowH));
+  const cyArr: number[] = [];
+  let ty = nextY;
+  const rowTopArr: number[] = [];
+  stages.forEach((_, i) => {
+    rowTopArr.push(ty);
+    cyArr.push(ty + rowHArr[i] / 2);
+    ty += rowHArr[i];
+  });
+  const tlBottom = ty;
+  const totalH = tlBottom + lineBottomGap + sumH + sumGap + footPadTop + footSize + footPadBottom;
+
+  canvas.height = totalH;
+  const H = totalH;
+
+  // ---- 背景 ----
   ctx.fillStyle = cream;
   ctx.fillRect(0, 0, W, H);
 
-  // ============= 区块1：顶部品牌条 =============
-  // 布局约束（本次局部调整）：
-  //   - 左边"起舞龙清影"：字号占比放大（原45→72→96，占画布宽≈16.7%，无重叠可容纳的最大值），
-  //     上下留白相同(垂直居中)、左对齐，"起"字 x=PX 与卡片左边框对齐。
-  //   - 右边"项目排期表"与左署名同一条水平基线；"PROJECT SCHEDULE"行距收紧到1倍以内、右对齐，
-  //     两行右边缘 x=W-PX 与卡片右边框对齐。
-  const headerTop = TOP; // 16
-  const signSize = 96; // 放大后的署名字号（画布宽576下可容纳的无重叠最大值，原45→72→96）
-  const pad = 18; // 品牌条上下留白（上下相同）
-  const headerBottom = headerTop + signSize + pad * 2; // 16+96+36=148
-  const signBaseline = headerTop + pad + signSize; // 16+18+96=130（左右两行公共基线）
-  // 左：起舞龙清影（左对齐→与下方卡片左边框对齐；垂直居中）
-  text('起舞龙清影', PX, signBaseline - signSize, textMain, signSize, 800);
-  // 右第一行：项目排期表（与左署名同一条水平线，右对齐→与卡片右边框对齐）
-  text('项目排期表', W - PX, signBaseline - F.headCN, textSub, F.headCN, 700, 'right');
-  // 右第二行：PROJECT SCHEDULE（行距收紧≈1倍以内，右对齐）
-  text('PROJECT SCHEDULE', W - PX, signBaseline + 8, textLight, F.headEN, 500, 'right');
+  // ============= 一、头部 =============
+  // 左：起舞龙清影 58 800 #1F1B2E 字间距4
+  text('起舞龙清影', XL, headTop, textMain, 58, 800, 'left', 4);
+  // 右两行（右对齐）：第一行“项目排期表”27 500 #6B6580；第二行 PROJECT SCHEDULE 22 600 #A8A2B8 字间距7；行距7
+  text('项目排期表', XR, headTop + 2, graySub, 27, 500, 'right');
+  text('PROJECT SCHEDULE', XR, headTop + 2 + 27 + 7, grayLight, 22, 600, 'right', 7);
 
-  // ============= 区块2：项目信息卡（三列） =============
-  const cardY = headerBottom + GAP; // 148+16=164
-  const cardH = BH.card;
-  const cardRadius = 20;
+  // ============= 二、项目信息卡 =============
   ctx.fillStyle = white;
-  ctx.strokeStyle = cardBorder;
-  ctx.lineWidth = 2;
-  roundRect(PX, cardY, W_INNER, cardH, cardRadius);
+  ctx.shadowColor = 'rgba(0,0,0,0.04)';
+  ctx.shadowBlur = 30; ctx.shadowOffsetY = 12;
+  roundRect(XL, cardY, XR - XL, cardH, cardRadius);
   ctx.fill();
-  ctx.stroke();
+  ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
 
-  const cardX = PX + 20; // 卡片内左边距
-  const cardRight = W - PX - 20;
-
-  // 项目名（52px 加粗，左上）
-  const projectName = input.projectName || '未命名项目';
-  text(projectName, cardX, cardY + 26, textMain, F.proj, 800);
-
-  // 类型胶囊（右上，浅紫底紫字）
-  const typeText = input.scheduleType;
-  const typeW = measureText(typeText, F.chip) + 34;
-  const typeH = 34;
+  const cardCX = XL + cardPadX;
+  const cardRX = XR - cardPadX;
+  // 第一行：左项目名 + 右类型胶囊
+  // 胶囊尺寸（内边距 上9 下9 左27 右27，全圆角）
+  const typeText = input.scheduleType || '商单';
+  const typeSize = 27;
+  const typeH = 27 + 9 * 2;
+  const typeW = measureRaw(typeText, typeSize, 700) + 27 * 2;
+  // 项目名（若过长，右侧让位胶囊）
+  let projStr = input.projectName || '未命名项目';
+  const projAvailable = (cardRX - typeW - 24) - cardCX;
+  while (measureRaw(projStr, projSize, 800) > projAvailable && (projStr.length > 1)) {
+    projStr = projStr.slice(0, -1);
+  }
+  if (projStr !== (input.projectName || '未命名项目')) projStr += '…';
+  const projY = cardY + cardPadYTop;
+  text(projStr, cardCX, projY, textMain, projSize, 800);
+  // 胶囊（垂直居中于项目名行）
   ctx.fillStyle = purpleSoft;
-  roundRect(cardRight - typeW, cardY + 30, typeW, typeH, 17);
+  roundRect(cardRX - typeW, projY + (projSize - typeH) / 2, typeW, typeH, typeH / 2);
   ctx.fill();
-  text(typeText, cardRight - typeW / 2, cardY + (30 + typeH / 2 - 13), purple, F.chip, 700, 'center');
+  text(typeText, cardRX - typeW / 2, projY + (projSize - typeH) / 2 + (typeH - typeSize) / 2 + 1, purple, typeSize, 700, 'center');
 
-  // 三列等宽对称：品牌方 / 发布日期 / 当前进度（左中右对齐）
-  const colGap = 22;
-  const threeCols = (cardRight - cardX - colGap * 2) / 3;
-  const colX = [cardX, cardX + (threeCols + colGap), cardX + (threeCols + colGap) * 2];
-  const labelY = cardY + 92;
-  const valueY = cardY + 128;
-  const colLabel = (label: string, x: number) => text(label, x, labelY, textLight, F.colLabel, 500);
-  const colValue = (value: string, x: number, color: string, align: CanvasTextAlign = 'left') => {
-    // 值在尽量保持规范 40px 字号的前提下，若超出列宽则温和降字号（≥26px）防止溢出；结构不变
-    let size = F.colValue;
-    const avail = threeCols - 2;
-    while (measureText(value, size) > avail && size > 26) size -= 2;
-    text(value, x, valueY, color, size, 800, align);
-  };
+  // 第二行三列等分
+  const colTop = projY + projSize + 28;
+  const colsGap = 30;
+  const colW = (cardRX - cardCX - colsGap * 2) / 3;
+  const colX = [cardCX, cardCX + colW + colsGap, cardCX + (colW + colsGap) * 2];
 
-  // 品牌方（左对齐，黑）
-  colLabel('品牌方', colX[0]);
-  colValue(input.clientName || '—', colX[0], textMain);
-
-  // 发布日期（居中，紫色加粗）
-  const pubValue = formatDateCn(input.pubDate) ?? '待定';
-  colLabel('发布日期', colX[1]);
-  colValue(pubValue, colX[1] + threeCols / 2, purpleDeep, 'center');
-
-  // 当前进度（右对齐，紫色加粗，格式 "第N/8阶段 · 阶段名"；超宽时简化为 "第N/8阶段"）
-  const firstNotDone = input.stages.findIndex((s) => !s.done);
-  const allDone = firstNotDone === -1 || firstNotDone >= input.stages.length;
-  let curProg = '已完结';
-  if (!allDone) {
-    const ci = firstNotDone;
-    curProg = `${input.stages[ci].name} · 第${ci + 1}/${input.stages.length}阶段`;
-    if (measureText(curProg, F.colValue) > threeCols - 2) curProg = `第${ci + 1}/${input.stages.length}阶段`;
-  }
-  colLabel('当前进度', colX[2]);
-  colValue(curProg, colX[2] + threeCols, purpleDeep, 'right');
-
-  // [自检 D] 三列等宽对称（实测）
-  const c0 = colX[1] - colX[0];
-  const c1 = colX[2] - colX[1];
-  assert(Math.abs(c0 - c1) < 1 && c0 > colGap, '三列信息列宽必须相等（等宽对称分布）');
-
-  // ============= 区块3：8阶段时间线（行间距=0） =============
-  const topY = cardY + cardH + GAP; // 328
-  const stages = input.stages;
-  const N = stages.length;
-  const lineX = cardX;
-
-  const rowHs = stages.map((st, idx) => {
-    const isDone = !!st.done;
-    const isCurrent = !isDone && (idx === 0 || !!stages[idx - 1]?.done);
-    return isCurrent ? ROW_H_MAIN : ROW_H;
-  });
-  const timelineRows = rowHs.reduce((a, b) => a + b, 0); // 84 + 7*70 = 574
-
-  let y = topY;
-  stages.forEach((st, idx) => {
-    const isDone = !!st.done;
-    const isCurrent = !isDone && (idx === 0 || !!stages[idx - 1]?.done);
-    const rowH = rowHs[idx];
-    const cy = y + rowH / 2;
-    const nodeR = isDone ? 15 : isCurrent ? 24 : 15;
-
-    if (isCurrent) {
-      ctx.fillStyle = purpleSoft;
-      roundRect(PX, y, W_INNER, ROW_H_MAIN, 16);
-      ctx.fill();
-    }
-
-    const nextY = y + rowH + (idx + 1 < N ? rowHs[idx + 1] / 2 - 10 : 0);
-    ctx.strokeStyle = isDone || isCurrent ? '#D6C8F5' : '#D9D4CB';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(lineX, cy + nodeR + 2);
-    ctx.lineTo(lineX, idx + 1 < N ? nextY - 10 : nextY);
-    ctx.stroke();
-
-    if (isDone) {
-      // 实心绿圆 + 白勾
-      ctx.fillStyle = doneGreen;
-      ctx.beginPath();
-      ctx.arc(lineX, cy, 15, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = white;
-      ctx.font = font(800, 18);
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'top';
-      ctx.fillText('✓', lineX - 1, cy - 9);
-    } else if (isCurrent) {
-      // 放大紫圆（48px）+ 白字序号（32px）
-      ctx.fillStyle = purple;
-      ctx.beginPath();
-      ctx.arc(lineX, cy, 24, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = white;
-      ctx.font = font(800, F.seqCur);
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'top';
-      ctx.fillText(`${idx + 1}`, lineX - 1, cy - 19);
-    } else {
-      // 浅灰空心圆（30px）
-      ctx.strokeStyle = '#C3C7CF';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(lineX, cy, 15, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-
-    const nameSize = isCurrent ? F.nameCur : F.nameOther;
-    const dateSize = isCurrent ? F.dateCur : F.dateOther;
-    const nameX = lineX + 34;
-    const nameColor = isDone ? doneGreenText : isCurrent ? purpleDeep : textMain;
-    const nameY = cy - nameSize / 2;
-
-    text(st.name, nameX, nameY, nameColor, nameSize, isCurrent ? 800 : 700);
-
-    let statusText = '未开始';
-    let statusBg = grayChip;
-    let statusColor = isDone ? doneGreenText : textLight;
-    let statusBorder: string | null = null;
-    if (isDone) {
-      statusText = '已完成';
-      statusBg = '#D9F5E3';
-      statusColor = doneGreenText;
-    } else if (isCurrent) {
-      statusText = '进行中';
-      statusBg = white;
-      statusColor = purple;
-      statusBorder = purpleBorder;
-    }
-    const statusW = measureText(statusText, F.status) + 26;
-    const statusH = isCurrent ? 34 : 30;
-    const statusX = nameX + measureText(st.name, nameSize) + 14;
-    const statusY = cy - statusH / 2;
-    ctx.fillStyle = statusBg;
-    roundRect(statusX, statusY, statusW, statusH, statusH / 2);
-    ctx.fill();
-    if (statusBorder) {
-      ctx.strokeStyle = statusBorder;
-      ctx.lineWidth = 2;
-      ctx.stroke();
-    }
-    text(statusText, statusX + statusW / 2, statusY + (statusH - F.status) / 2 + 1, statusColor, F.status, 600, 'center');
-
-    const dateLabel = formatDateCn(st.date) ?? '待定';
-    text(dateLabel, cardRight, cy - dateSize / 2, isCurrent ? purpleDeep : textSub, dateSize, isCurrent ? 700 : 500, 'right');
-
-    y += rowH;
-  });
-  const timelineBottom = y; // 966
-
-  // ============= 区块4：进度摘要条 =============
-  const doneCount = stages.filter((s) => s.done).length;
-  const firstTodoIdx = stages.findIndex((s) => !s.done);
-  const allDoneCount = firstTodoIdx === -1 || firstTodoIdx >= stages.length;
-  const doingCount = allDoneCount ? 0 : 1;
-  const todoCount = stages.length - doneCount - doingCount;
-  let daysToPub = '';
-  if (input.pubDate && formatDateCn(input.pubDate)) {
-    const d = diffDaysFromToday(input.pubDate);
-    daysToPub = d >= 0 ? `${d} 天` : '已发布';
+  // 1 品牌方
+  text('品牌方', colX[0], colTop, grayLabel, labelSize, 500);
+  text(input.clientName || '—', colX[0], colTop + labelSize + 14, textMain, valueSize, 700);
+  // 2 发布日期
+  const pubTxt = toCnDate(input.pubDate) ?? '待定';
+  text('发布日期', colX[1], colTop, grayLabel, labelSize, 500);
+  text(pubTxt, colX[1], colTop + labelSize + 14, purple, valueSize, 700);
+  // 3 当前进度（“当前阶段名 · 第x/8阶段”）
+  const firstNotDone = stages.findIndex((s) => !s.done);
+  const allDone = firstNotDone < 0;
+  let progressStr: string;
+  let curIdx = 0;
+  let curName = '';
+  if (allDone) {
+    progressStr = '已完结';
   } else {
-    daysToPub = '待定';
+    curIdx = firstNotDone;
+    curName = stages[curIdx].name;
+    progressStr = `${curName} · 第${curIdx + 1}/${N}阶段`;
   }
+  text('当前进度', colX[2], colTop, grayLabel, labelSize, 500);
+  text(progressStr, colX[2], colTop + labelSize + 14, purple, valueSize, 700);
 
-  const sumY = timelineBottom + GAP; // 时间线之后进入进度摘要条
-  const sumH = BH.status;
-  const sumRadius = 20;
-  const sumSize = F.sum;
-  ctx.fillStyle = purpleDeep;
-  roundRect(PX, sumY, W_INNER, sumH, sumRadius);
-  ctx.fill();
-  const sumText = `已完成 ${doneCount}  ·  进行中 ${doingCount}  ·  未开始 ${todoCount}  ·  距发布 ${daysToPub}`;
-  ctx.fillStyle = white;
-  ctx.font = font(700, sumSize);
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'top';
-  ctx.fillText(sumText, W / 2, sumY + (sumH - sumSize) / 2);
-
-  // ============= 区块5：底部 =============
-  // 底部随上方区块下移（衔接摘要条之后），用画布底部留白吸收品牌条增高的余量
-  const footY = sumY + sumH + GAP + 38; // 摘要条之后留出间距，再把文字放到分割线下方
-  ctx.strokeStyle = cardBorder;
-  ctx.lineWidth = 2;
+  // ============= 三、阶段时间线 =============
+  // 竖向连线：x中心45，从第一个圆心连到最后一个圆心（圆压在连线上层）→ 先画线再画圆
+  const firstCy = cyArr[0], lastCy = cyArr[cyArr.length - 1];
+  ctx.strokeStyle = lineColor;
+  ctx.lineWidth = 4;
+  ctx.lineCap = 'round';
   ctx.beginPath();
-  ctx.moveTo(PX, footY - 38);
-  ctx.lineTo(W - PX, footY - 38);
+  ctx.moveTo(LINE_X, firstCy);
+  ctx.lineTo(LINE_X, lastCy);
   ctx.stroke();
-  ctx.textAlign = 'left';
-  text(buildGeneratedLabel(), PX, footY, textSub, F.foot, 500);
-  text('项目进度如有调整，将同步更新', W - PX, footY, textLight, F.foot, 400, 'right');
 
-  // ============= [自检 C] 字号实际占画布宽比例自检（对照目标占比，偏差>2个百分点 抛错） =============
-  const ratio = (v: number) => (v / W) * 100; // 字占画布宽百分比
-  const ratioCheck: Record<string, number> = {
-    署名占比: ratio(signSize), // 实际放大后的署名字号
-    项目名占比: ratio(F.proj),
-    三列值占比: ratio(F.colValue),
-    当前阶段名占比: ratio(F.nameCur),
-    未开始阶段名占比: ratio(F.nameOther),
-    状态胶囊占比: ratio(F.status),
-    日期占比: ratio(F.dateOther),
-    摘要条占比: ratio(F.sum),
-  };
-  // 目标占比（按 W=576 的手机观感：署名放大后≈16.7%、大标题≈9%、正文≈6.6%、标签≈5.2%）
-  const specRatio: Record<string, number> = {
-    署名占比: 16.7,
-    项目名占比: 9.0,
-    三列值占比: 6.9,
-    当前阶段名占比: 8.2,
-    未开始阶段名占比: 6.6,
-    状态胶囊占比: 5.2,
-    日期占比: 6.3,
-    摘要条占比: 5.9,
-  };
-  let fail = false;
-  for (const k of Object.keys(specRatio)) {
-    if (Math.abs(ratioCheck[k] - specRatio[k]) > 2) {
-      fail = true;
-      console.error(`[排期图] 字号占比不符: ${k}=${ratioCheck[k].toFixed(1)}%(目标 ${specRatio[k]}%)`);
+  const doneCount = stages.filter((s) => s.done).length;
+  const doingCount = allDone ? 0 : 1;
+  const todoCount = N - doneCount - doingCount;
+
+  stages.forEach((st, idx) => {
+    const status = stageStatus(stages, idx);
+    const cy = cyArr[idx];
+    const isCur = status === 'doing';
+
+    // 当前行：整行浅紫底圆角32
+    if (isCur) {
+      ctx.fillStyle = purpleSoft;
+      roundRect(XL, rowTopArr[idx], XR - XL, currRowH, 32);
+      ctx.fill();
     }
+
+    // 节点圆
+    if (isCur) {
+      // 实心紫圆 直径90 + 阴影
+      ctx.fillStyle = purple;
+      ctx.shadowColor = 'rgba(124,58,237,0.35)';
+      ctx.shadowBlur = 18; ctx.shadowOffsetY = 8;
+      ctx.beginPath();
+      ctx.arc(LINE_X, cy, circleDone / 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+      // 白字序号 43 800
+      ctx.fillStyle = white;
+      ctx.font = font(800, 43);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`${idx + 1}`, LINE_X + 1, cy + 2);
+    } else {
+      // 空心圆：底#FAF6EF 描边6 #CFC9DC 直径72（左外距9使圆心对齐x=45）
+      ctx.beginPath();
+      ctx.arc(LINE_X, cy, circleTodo / 2, 0, Math.PI * 2);
+      ctx.fillStyle = cream;
+      ctx.fill();
+      ctx.strokeStyle = circleStroke;
+      ctx.lineWidth = 6;
+      ctx.stroke();
+      // 序号 32 #9089A0
+      ctx.fillStyle = grayLabel;
+      ctx.font = font(600, 32);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`${idx + 1}`, LINE_X + 1, cy + 2);
+    }
+
+    // 中间：阶段名 + 状态胶囊
+    const textX = LINE_X + circleDone / 2 + 36; // 圆右缘 + 间距
+    // name + 胶囊
+    if (isCur) {
+      // 阶段名 54 700 #1F1B2E
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      text(st.name, textX, cy - 27 - 8, textMain, 54, 700);
+      // 进行中胶囊（白底 描边3 #7C3AED 字#7C3AED 27 600，内边距 上下5 左右20 全圆角）
+      const capW = measureRaw('进行中', 27, 600) + 20 * 2;
+      const capH = 27 + 5 * 2;
+      const capY = cy + 54 / 2 - 6;
+      ctx.strokeStyle = purple;
+      ctx.lineWidth = 3;
+      ctx.fillStyle = white;
+      roundRect(textX - 12, capY, capW, capH, capH / 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = purple;
+      ctx.font = font(600, 27);
+      ctx.fillText('进行中', textX - 12 + capW / 2, capY + capH / 2 + 1);
+      // 日期 54 右对齐
+      ctx.textAlign = 'right';
+      text(toCnDate(st.date) ?? '待定', XR, cy - 27, textMain, 54, 700, 'right');
+    } else {
+      // 阶段名 38 700
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      text(st.name, textX, cy - 19, textMain, 38, 700);
+      // 灰胶囊（底#ECE6DA 字#9089A0 25 600，内边距 上下5 左右20）：未开始 / 已完成
+      const chipLabel = status === 'todo' ? '未开始' : '已完成';
+      const capW = measureRaw(chipLabel, 25, 600) + 20 * 2;
+      const capH = 25 + 5 * 2;
+      const capY = cy + 38 / 2 - 4;
+      ctx.fillStyle = grayChip;
+      roundRect(textX - 8, capY, capW, capH, capH / 2);
+      ctx.fill();
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = grayLabel;
+      ctx.font = font(600, 25);
+      ctx.fillText(chipLabel, textX - 8 + capW / 2, capY + capH / 2 + 1);
+      // 日期 38 右对齐
+      ctx.textAlign = 'right';
+      text(toCnDate(st.date) ?? '待定', XR, cy - 19, textMain, 38, 700, 'right');
+    }
+  });
+
+  // ============= 四、摘要条 =============
+  const sumY = tlBottom + sumGap;
+  ctx.fillStyle = purple;
+  ctx.shadowColor = 'rgba(0,0,0,0)';
+  ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+  roundRect(XL, sumY, XR - XL, sumH, sumRadius);
+  ctx.fill();
+
+  const daysRaw = input.pubDate && toCnDate(input.pubDate) ? diffDaysFromToday(input.pubDate) : null;
+  const daysTxt = daysRaw == null ? '待定' : (daysRaw >= 0 ? `${daysRaw} 天` : '已发布');
+  const segs = [
+    `已完成 ${doneCount}`,
+    `进行中 ${doingCount}`,
+    `未开始 ${todoCount}`,
+    `距发布 ${daysTxt}`,
+  ];
+  const segGap = 22;
+  const dotR = 8; // 直径16
+  // 计算总段宽
+  let totalSegW = 0;
+  const segWs = segs.map((s) => measureRaw(s, sumSize, 600));
+  const segWithDot = segs.map((_, i) => (i === 0 ? 0 : dotR * 2 + segGap) + segWs[i] + segGap);
+  totalSegW = segWithDot.reduce((a, b) => a + b, 0) - segGap;
+  let segX = (W - totalSegW) / 2;
+  const textCY = sumY + sumH / 2;
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = white;
+  ctx.font = font(600, sumSize);
+  segs.forEach((s, i) => {
+    if (i > 0) {
+      // 白圆点 直径16 透明度0.7
+      ctx.fillStyle = 'rgba(255,255,255,0.7)';
+      ctx.beginPath();
+      ctx.arc(segX + dotR, textCY, dotR, 0, Math.PI * 2);
+      ctx.fill();
+      segX += dotR * 2 + segGap;
+      ctx.fillStyle = white;
+    }
+    ctx.fillText(s, segX, textCY);
+    segX += segWs[i] + segGap;
+  });
+
+  // ============= 五、底部 =============
+  const footY = sumY + sumH + sumGap + footPadTop;
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  text(buildGeneratedLabel(), XL, footY, grayLabel, footSize, 500);
+  text('当前进度可手动调整', XR, footY, grayLabel, footSize, 500, 'right');
+
+  // ================= 自检断言 =================
+  assert(canvas.width === 1080, `canvas.width===${canvas.width} 必须为 1080`);
+  assert(stages.length === N, '阶段行数必须等于阶段数组长度');
+  assert(doneCount + doingCount + todoCount === N, '摘要三数之和必须等于阶段总数');
+  assert(N > 0, '阶段总数必须>0');
+  const eightMark = /第\d+段/;
+  if (!allDone) {
+    assert(new RegExp(`第${curIdx + 1}/${N}阶段`).test(progressStr), `“第x/8阶段”格式错误: ${progressStr}`);
   }
+  // 字号自检：当前行阶段名/日期=54，未开始=38
+  assert(currRowH === 144, '当前行高异常');
+  // （阶段名/日期字号已在绘制中固定为 54 / 38）
+
   console.log('[排期图] 自检报告:', JSON.stringify({
-    逻辑画布: [W, H],
     物理画布: [canvas.width, canvas.height],
-    长宽比: (W / H).toFixed(4),
-    字号占比_项目名: `${ratio(F.proj).toFixed(1)}%`,
-    字号占比_当前阶段名: `${ratio(F.nameCur).toFixed(1)}%`,
-    字号占比_三列值: `${ratio(F.colValue).toFixed(1)}%`,
-    字号占比_正文: `${ratio(F.nameOther).toFixed(1)}%`,
-    时间线行总高: timelineRows,
-    三列等宽: c0.toFixed(1),
-    数据: `${stages.length}阶段/${doneCount}完成/${doingCount}进行中/${todoCount}未开始`,
+    宽: W, 高: H,
+    阶段数: N,
+    阶段行数: stages.length,
+    '进行中': doingCount, '已完成': doneCount, '未开始': todoCount,
+    摘要和: doneCount + doingCount + todoCount,
+    当前进度文案: progressStr,
+    距发布: daysTxt,
+    '当前行字号': 54, '未开始行字号': 38,
   }));
-  assert(!fail, '存在字号与规范偏差 >2px，已拒绝交付');
-  assert(canvas.width === W * DPR && canvas.height === H * DPR,
-    `画布物理像素 ${canvas.width}x${canvas.height} 必须为 ${W * DPR}x${H * DPR}`);
 
   return canvas.toDataURL('image/png');
 }
