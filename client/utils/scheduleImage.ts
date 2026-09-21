@@ -117,7 +117,7 @@ export function renderScheduleImageCanvas(input: ScheduleImageInput): string {
 
   // ---- 通用工具 ----
   const font = (weight: number, size: number) =>
-    `font-weight:${weight}; font-size:${size}px; font-family:-apple-system,'PingFang SC','Helvetica Neue',sans-serif;`;
+    `${weight} ${size}px -apple-system,'PingFang SC','Helvetica Neue',sans-serif;`;
   const text = (
     s: string, x: number, y: number, color: string, size: number,
     weight = 500, align: CanvasTextAlign = 'left',
