@@ -183,6 +183,11 @@ export default function HomePage() {
               .map((t: { plan_date?: string }) => t?.plan_date)
               .filter((d: unknown): d is string => typeof d === 'string');
           }
+        } else if (j.type === 'schedule_synced') {
+          createdCount = Number(j.count) || 0;
+          if (Array.isArray(j.plan_dates)) {
+            createdDates = j.plan_dates.filter((d: unknown): d is string => typeof d === 'string');
+          }
         } else if (j.type === 'overload_warning') {
           overloads.push({
             date: j.date ?? '',

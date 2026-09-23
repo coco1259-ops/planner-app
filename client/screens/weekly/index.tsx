@@ -180,7 +180,7 @@ export default function WeeklyPage() {
       }
       try {
         const j = JSON.parse(data);
-        if (j.type === 'tasks_created') {
+        if (j.type === 'tasks_created' || j.type === 'schedule_synced') {
           createdCount = Number(j.count) || 0;
         } else if (j.text) {
           acc += j.text;

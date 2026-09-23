@@ -100,6 +100,10 @@ const SYSTEM_PROMPT = `# 角色
 未提的阶段日期留空，所有完成状态默认未完成。
 写入成功回复："排期已建，各阶段日期去排期Tab补上"
 
+# 工作流三：查看与同步排期进度
+1. 你拥有"排期Tab"的实时数据（项目/类型/日期/各阶段是否完成），系统已注入。用户问"我的排期有哪些/某项目进度/某阶段日期"等，**直接根据注入的排期数据如实回答**，不要编造。
+2. 用户要求"把排期写进日计划/排期进度同步到/按排期阶段日期排任务"时，你只需提示系统会把各阶段按其日期写入对应日期的日计划任务表，系统已自动处理；不要重复人工创建任务。
+
 # 通用
 - 不要使用 Markdown 表格，使用分行的纯文本便于移动端阅读
 - 今天是{date}
@@ -112,6 +116,9 @@ const SYSTEM_PROMPT = `# 角色
 
 const TASK_TYPES = ['deep', 'light', 'personal', 'study', 'goal', 'life'] as const;
 type TaskType = (typeof TASK_TYPES)[number];
+
+/** 排期固定 8 阶段顺序（与排期Tab一致） */
+const SCHEDULE_STAGE_KEYS = ['大纲', '粗稿', '定稿', '拍摄', '粗剪', '送审', '精剪', '发布'] as const;
 
 function looksLikePlanRequest(text: string): boolean {
   return /安排|计划|明天|后天|今天|上午|下午|晚上|早上|中午|凌晨|任务|提醒|待办|约|星期[一二三四五六日天]|日程|排/.test(
@@ -175,10 +182,16 @@ router.post('/plan', async (req, res) => {
   const lastUser =
     [...history].reverse().find((m) => m.role === 'user')?.content ?? '';
 
+  // 读取排期Tab实时内容，注入给 Agent（让计划管家能看到排期数据）
+  const scheduleContext = await buildScheduleContext();
+
   // 内置大脑的消息（带系统提示），今天是今天日期
   const genericMsgs: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
     { role: 'system', content: SYSTEM_PROMPT.replace('{date}', today) },
     ...history,
+    ...(scheduleContext
+      ? [{ role: 'system' as const, content: `# 用户排期Tab实时数据（仅作查看/参考，禁止凭空编造）\n${scheduleContext}` }]
+      : []),
   ];
 
   try {
@@ -216,17 +229,40 @@ router.post('/plan', async (req, res) => {
 
     // 3) 若未走排期且用户在陈述排任务，则抽取为任务并写入 tasks 表
     let created: Array<{ plan_date: string }> = [];
-    if (scheduleResult !== 'created' && looksLikePlanRequest(lastUser)) {
-      try {
-        created = await extractAndInsertTasks(client, lastUser, todayStr);
-        if (created.length > 0) {
-          res.write(
-            `data: ${JSON.stringify({ type: 'tasks_created', count: created.length, tasks: created })}\n\n`,
-          );
+    let synced: { count: number; plan_dates: string[] } | null = null;
+    if (scheduleResult !== 'created') {
+      // 3.1) 排期进度 → 日计划：把排期各阶段(按其 date)写进对应日期的任务表
+      let syncIntent = false;
+      if (looksLikeSyncToPlan(lastUser)) {
+        syncIntent = true;
+        try {
+          synced = await syncScheduleToPlan(client, lastUser, todayStr, scheduleContext);
+          if (synced && synced.count > 0) {
+            res.write(
+              `data: ${JSON.stringify({
+                type: 'schedule_synced',
+                count: synced.count,
+                plan_dates: synced.plan_dates,
+              })}\n\n`,
+            );
+          }
+        } catch (err) {
+          console.error('sync schedule to plan error:', err);
         }
-      } catch (err) {
-        // 抽取失败不影响对话主流程
-        console.error('extract tasks error:', err);
+      }
+      // 3.2) 常规任务抽取：仅在未走"排期同步"意图时执行，避免出现冗余的任务抽取结果
+      if (!syncIntent && looksLikePlanRequest(lastUser)) {
+        try {
+          created = await extractAndInsertTasks(client, lastUser, todayStr);
+          if (created.length > 0) {
+            res.write(
+              `data: ${JSON.stringify({ type: 'tasks_created', count: created.length, tasks: created })}\n\n`,
+            );
+          }
+        } catch (err) {
+          // 抽取失败不影响对话主流程
+          console.error('extract tasks error:', err);
+        }
       }
     }
 
@@ -374,8 +410,145 @@ async function emitOverloadWarnings(
   }
 }
 
-/** 将"stages 中文键名 → {date, done}"对象按 8 阶段规范化（缺失的补空、done 默认 false）。 */
-const SCHEDULE_STAGE_KEYS = ['大纲', '粗稿', '定稿', '拍摄', '粗剪', '送审', '精剪', '发布'] as const;
+/**
+ * 将排期各阶段的进度，按其阶段 date 自动写入对应日期的日计划（tasks 表）。
+ * 返回写入的数量与涉及的日期。当日已有同标题任务的会去重跳过。
+ */
+async function syncScheduleToPlan(
+  client: LLMClient,
+  userText: string,
+  todayStr: string,
+  scheduleContext: string,
+): Promise<{ count: number; plan_dates: string[] }> {
+  const prompt = `用户想把「排期Tab」里的某个/全部项目阶段，按各阶段设定的日期，自动写入对应日期的日计划任务表。
+
+# 用户排期Tab实时数据
+${scheduleContext || '（当前无排期数据）'}
+
+# 用户指令
+${userText}
+
+# 任务
+1) 判断用户要求同步哪些项目（"全部/所有/这些"→全部项目；"某个项目"→该项目；未指定→默认同步即将到达的未完成阶段）。
+2) 只对"该阶段设置了日期(date)"且"完成态为未完成(○)"的阶段生成任务；每个阶段生成一条任务。
+3) 只输出一个 JSON 数组，不要输出任何其他文字、代码块标记或解释。
+每个元素格式：{"project_name":"项目名","stage":"阶段名","title":"推进「项目名」·阶段名","plan_date":"该阶段date(YYYY-MM-DD)","time_slot":"碎片","task_type":"light","remark":"排期进度，出自「项目名」的阶段名"}
+- plan_date 必须用该阶段已设定的 date；若该阶段没设 date 或已完成则跳过该条（不要输出）。
+- 若用户是问询排期内容、闲聊，而非要求写入日计划，则返回 []。
+- 输出纯 JSON 数组。
+
+注意：今天真实日期是 ${todayStr}（GMT+8）。`;
+
+  const resp = await client.invoke(
+    [{ role: 'user', content: prompt }],
+    { model: EXTRACT_MODEL, temperature: 0.1 },
+  );
+
+  const raw = (resp?.content ?? '').replace(/```json/gi, '').replace(/```/g, '').trim();
+  let list: unknown;
+  try {
+    const start = raw.indexOf('[');
+    const end = raw.lastIndexOf(']');
+    list = JSON.parse(start >= 0 && end > start ? raw.slice(start, end + 1) : raw);
+  } catch {
+    list = [];
+  }
+  if (!Array.isArray(list)) return { count: 0, plan_dates: [] };
+
+  const db = getSupabaseClient();
+  let inserted = 0;
+  const dates: string[] = [];
+
+  for (const item of list as Array<Record<string, unknown>>) {
+    const project = typeof item?.project_name === 'string' ? item.project_name.trim() : '';
+    const stage = typeof item?.stage === 'string' ? item.stage.trim() : '';
+    const rd = typeof item?.plan_date === 'string' ? item.plan_date.trim() : '';
+    if (!project || !stage || !/^\d{4}-\d{2}-\d{2}$/.test(rd)) continue;
+    const title =
+      (typeof item?.title === 'string' && item.title.trim()) || `推进「${project}」${stage}`;
+
+    // 当日去重：同 date 且同标题已存在则跳过
+    try {
+      const { data: existing } = await db
+        .from('tasks')
+        .select('id')
+        .eq('plan_date', rd)
+        .eq('title', title)
+        .limit(1);
+      if (existing && existing.length > 0) continue;
+    } catch {
+      /* 查重失败不阻塞 */
+    }
+
+    const { error } = await db.from('tasks').insert({
+      title: title.slice(0, 255),
+      remark:
+        (typeof item?.remark === 'string' ? item.remark : '') ||
+        `排期进度，出自「${project}」${stage}`,
+      task_type: 'light',
+      plan_date: rd,
+      time_slot: typeof item?.time_slot === 'string' && item.time_slot ? String(item.time_slot) : '碎片',
+      estimated_duration: '',
+      status: 'todo',
+    });
+    if (!error) {
+      inserted += 1;
+      dates.push(rd);
+    }
+  }
+
+  return { count: inserted, plan_dates: [...new Set(dates)] };
+}
+
+/**
+ * 从 schedule 表读取全部排期项目，格式化为 Agent 可见的「排期Tab」摘要文本。
+ * 让计划管家能实时看到用户排期tab里的内容（项目/类型/客户/发布日期/各阶段日期与完成态）。
+ */
+async function buildScheduleContext(): Promise<string> {
+  try {
+    const db = getSupabaseClient();
+    const { data, error } = await db
+      .from('schedule')
+      .select('project_name,schedule_type,client_name,pub_date,stages')
+      .order('pub_date', { ascending: true, nullsFirst: false });
+    if (error) throw error;
+    const rows = (data ?? []) as Array<{
+      project_name: string;
+      schedule_type?: string;
+      client_name?: string;
+      pub_date?: string | null;
+      stages?: Record<string, { date?: string | null; done?: boolean } | null>;
+    }>;
+    if (!rows.length) return '';
+    const lines = rows.map((r, idx) => {
+      const stages = (r.stages && typeof r.stages === 'object' ? r.stages : {}) as Record<string, { date?: string | null; done?: boolean }>;
+      const stageText = SCHEDULE_STAGE_KEYS.map((k) => {
+        const it = stages[k];
+        const date = it && it.date ? it.date : '';
+        const done = it ? (it.done === true ? '✓' : '○') : '○';
+        return `${k}:${done}${date ? `(${date})` : ''}`;
+      }).join(' ');
+      return `${idx + 1}. ${r.project_name}【${r.schedule_type === '科普选题' ? '科普选题' : '商单'}】${
+        r.client_name ? `客户:${r.client_name} ` : ''
+      }发布:${r.pub_date || '未定'}\n   阶段: ${stageText}`;
+    });
+    return `当前排期Tab内容：\n${lines.join('\n')}\n说明：每阶段格式为 阶段名:完成标记(日期)，✓=已完成 ○=未完成。用户要求查看或管理排期时，基于此列表回答。`;
+  } catch (e) {
+    console.error('build schedule context error:', e);
+    return '';
+  }
+}
+
+/**
+ * 判断用户是否要求"把排期里的某个/全部阶段进度，自动写入对应日期的日计划"。
+ */
+function looksLikeSyncToPlan(text: string): boolean {
+  return (
+    /(把|将|帮|请).*(排期|项目|选题|商单).*(写进|写入|排进|排到|同步|放进|落到|安排到).*(日计划|日程|计划|任务表|任务列表|日期)|排期.*(同步|写进|写入).*(日计划|日程|计划|任务)/.test(
+      text || '',
+    )
+  );
+}
 
 function normalizeStages(raw: unknown): Record<string, { date: string | null; done: boolean }> {
   const out: Record<string, { date: string | null; done: boolean }> = {};
