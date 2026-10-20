@@ -103,3 +103,7 @@ expo-env.d.ts
 *.tsbuildinfo
 node-compile-cache/
 .codegraph/
+
+# 用户上传的临时截图素材（不入库）
+assets/*.png
+assets/*.jpg
